@@ -111,6 +111,10 @@ SOFTWARE.
   label.small input { width: 72px; font: inherit; color: var(--ink); background: var(--panel);
     border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
   footer { color: var(--muted); font-size: 12px; }
+  details#settings { margin-top: 8px; }
+  details#settings summary { color: var(--muted); font-size: 13px; cursor: pointer; width: fit-content; }
+  .settings { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-top: 8px; }
+  .hint { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 12px; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -142,9 +146,20 @@ SOFTWARE.
     </form>
     <div class="row" style="margin-top:10px">
       <span class="status grow" id="genStatus"></span>
-      <label class="small">Max reply <input id="maxNew" type="number" min="1" max="2000" value="512"></label>
       <button id="newChat" type="button" disabled>New chat</button>
     </div>
+    <details id="settings">
+      <summary>Settings</summary>
+      <div class="settings">
+        <label class="small">Experts per byte <input id="topK" type="number" min="1" max="32" value="32"></label>
+        <label class="small">Recurrence passes, least <input id="least" type="number" min="1" max="24" value="1"></label>
+        <label class="small">most <input id="most" type="number" min="1" max="24" value="24"></label>
+        <label class="small">Max reply (bytes) <input id="maxNew" type="number" min="1" max="2000" value="512"></label>
+        <button id="resetSettings" type="button">Defaults</button>
+        <p class="hint">Each byte is routed to this many of the 32 experts (trained with 8). The model decides
+          for itself how many passes each byte takes; these bounds only limit that choice.</p>
+      </div>
+    </details>
   </section>
 
   <footer id="footer">Greedy decoding: the same conversation always gives the same reply. The model runs on your own GPU; nothing you type leaves this page. Needs a browser with WebGPU, such as a recent Chrome or Edge.</footer>
@@ -152,7 +167,7 @@ SOFTWARE.
 <script type="module">
 // web/kernels.js
 var HEADER = `
-struct G { rows: u32, offset: u32, _a: u32, _b: u32 }
+struct G { rows: u32, offset: u32, topk: u32, lohi: u32 }   // lohi: least | most << 16
 struct S { inDim: u32, outDim: u32, rows1: u32, gate: u32,
            pass_: u32, first: u32, last: u32, cf: f32 }
 // state, as u32 words (see engine.js: ST_*)
@@ -477,7 +492,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
   workgroupBarrier();
   if (e == 0u) {
     var taken = 0u;
-    for (var n = 0u; n < 8u; n++) {
+    for (var n = 0u; n < g.topk; n++) {
       var best = 0u; var bv = -3.0e38;
       for (var j = 0u; j < 32u; j++) {
         if ((taken & (1u << j)) == 0u && z[j] > bv) { bv = z[j]; best = j; }
@@ -490,6 +505,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
 var ADMIT = HEADER + `
 @group(0) @binding(0) var<uniform> s: S;
 @group(0) @binding(1) var<storage, read_write> st: array<u32>;
+@group(0) @binding(2) var<uniform> g: G;
 @compute @workgroup_size(1)
 fn main() {
   let nact = st[s.gate];
@@ -502,7 +518,7 @@ fn main() {
   } else if (st[ADMITTED] != 0xffffffffu) {
     st[ADMITTED] = st[ADMITTED] | req;
   }
-  let k = min(8u, countOneBits(st[ADMITTED]));
+  let k = min(g.topk, countOneBits(st[ADMITTED]));
   st[K] = k;
   let m = nact * k;
   st[BOUND] = max(1u, u32(ceil(s.cf * f32(m) / 32.0)));
@@ -529,8 +545,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if ((adm & (1u << e)) != 0u) { zsum += exp(logits[r * 32u + e] - mx); }
   }
   var taken = 0u;
-  var ids = array<u32, 8>();
-  var ps = array<f32, 8>();
+  var ids = array<u32, 32>();
+  var ps = array<f32, 32>();
   var psum = 0.0;
   for (var n = 0u; n < k; n++) {
     var best = 0u; var bv = -3.0e38;
@@ -543,9 +559,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     ps[n] = exp(bv - mx) / zsum;
     psum += ps[n];
   }
-  for (var n = 0u; n < 8u; n++) {
-    route[r * 24u + n] = ids[n];
-    route[r * 24u + 8u + n] = bitcast<u32>(select(0.0, ps[n] / psum * gate[ids[n]], n < k));
+  for (var n = 0u; n < 32u; n++) {
+    route[r * 96u + n] = ids[n];
+    route[r * 96u + 32u + n] = bitcast<u32>(select(0.0, ps[n] / psum * gate[ids[n]], n < k));
   }
 }`;
 var CAPACITY = HEADER + `
@@ -562,8 +578,8 @@ fn main(@builtin(local_invocation_id) lid3: vec3<u32>) {
   for (var r = 0u; r < g.rows; r++) {
     if (st[HALTED + r] != 0u) { continue; }
     for (var j = 0u; j < k; j++) {
-      if (route[r * 24u + j] == e) {
-        route[r * 24u + 16u + j] = select(0u, 1u, count < bound);
+      if (route[r * 96u + j] == e) {
+        route[r * 96u + 64u + j] = select(0u, 1u, count < bound);
         count++;
       }
     }
@@ -586,14 +602,14 @@ var<workgroup> xsum: f32;
 @compute @workgroup_size(64)
 fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid3: vec3<u32>) {
   let lid = lid3.x;
-  let p = wid.y; let r = p / 8u; let j = p % 8u;
+  let p = wid.y; let r = p / 32u; let j = p % 32u;
   if (lid == 0u) {
     var open = st[s.gate];
-    if (r >= g.rows || st[HALTED + r] != 0u || j >= st[K] || route[r * 24u + 16u + j] == 0u) { open = 0u; }
+    if (r >= g.rows || st[HALTED + r] != 0u || j >= st[K] || route[r * 96u + 64u + j] == 0u) { open = 0u; }
     gateOpen = open;
   }
   if (workgroupUniformLoad(&gateOpen) == 0u) { return; }
-  let e = route[r * 24u + j];
+  let e = route[r * 96u + j];
   let o = wid.x * 64u + lid;               // of 2048
   var a1 = 0.0; var a3 = 0.0;
   for (var gi = 0u; gi < 4u; gi++) {
@@ -642,7 +658,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
     gateOpen = open;
     var kept = 0u;
     if (open != 0u) {
-      for (var j = 0u; j < st[K]; j++) { kept |= route[r * 24u + 16u + j] << j; }
+      for (var j = 0u; j < st[K]; j++) { kept |= route[r * 96u + 64u + j] << j; }
     }
     keptW = kept;
   }
@@ -650,11 +666,11 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
   let kept = workgroupUniformLoad(&keptW);
   let o = wid.x * 64u + lid;               // of 512
   var total = 0.0;
-  for (var j = 0u; j < 8u; j++) {
+  for (var j = 0u; j < 32u; j++) {
     if ((kept & (1u << j)) == 0u) { continue; }
-    let e = route[r * 24u + j];
-    let wt = bitcast<f32>(route[r * 24u + 8u + j]);
-    let p = r * 8u + j;
+    let e = route[r * 96u + j];
+    let wt = bitcast<f32>(route[r * 96u + 32u + j]);
+    let p = r * 32u + j;
     var acc = 0.0;
     for (var gi = 0u; gi < 16u; gi++) {
       for (var i = lid; i < 128u; i += 64u) { xs[i] = eh[p * 2048u + gi * 128u + i]; }
@@ -723,7 +739,9 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
     if (s.last != 0u) { lam = 1.0; }
     let cum = bitcast<f32>(atomicLoad(&st[CUM + r])) * (1.0 - lam);
     atomicStore(&st[CUM + r], bitcast<u32>(cum));
-    let newly = (1.0 - cum) >= 0.9 || s.last != 0u;
+    let least = g.lohi & 0xffffu; let most = g.lohi >> 16u;
+    var newly = (1.0 - cum) >= 0.9 || s.last != 0u;
+    if (s.pass_ + 1u < least) { newly = false; } else if (s.pass_ + 1u == most) { newly = true; }
     if (newly) {
       atomicStore(&st[HALTED + r], 1u);
       if (isLast) { atomicStore(&st[STEPS], s.pass_ + 1u); atomicStore(&st[NEWLY + s.pass_], 1u); }
@@ -844,6 +862,9 @@ class Engine {
     if (shape.haltThresh !== 0.9)
       throw new Error(`halt_thresh ${shape.haltThresh} is not ported (0.9 is)`);
     this.offset = 0;
+    this.topK = manifest.cfg.pool_top_k;
+    this.least = 1;
+    this.most = shape.maxSteps;
     const dev = device;
     const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
     const buf = (bytes) => dev.createBuffer({ size: Math.max(16, Math.ceil(bytes / 16) * 16), usage });
@@ -904,8 +925,8 @@ class Engine {
       x1: buf(R * D * 4),
       ff: buf(R * 1408 * 4),
       rl: buf(R * 32 * 4),
-      route: buf(R * 24 * 4),
-      eh: buf(R * 8 * 2048 * 4),
+      route: buf(R * 96 * 4),
+      eh: buf(R * 32 * 2048 * 4),
       st: buf(ST.WORDS * 4),
       yf: buf(D * 4),
       logits: buf(272 * 4),
@@ -994,7 +1015,7 @@ class Engine {
       const slot = SLOTS_PRE + n;
       const gate = ST.COUNT + n;
       const s = this.#s({ gate, pass: n, first: n === 0 ? 1 : 0, last: n === this.maxSteps - 1 ? 1 : 0 });
-      ops.push(this.#op(ADAPTER, [g, b.h, b.x, w.adapter, b.u], (rows) => [D / 64, Math.ceil(rows / 8)]), norm(b.u, r.ln1, b.a), qmm(b.a, r.qkv, b.qkv, D, QKV), ropeKv(slot), attn(slot, gate), qmm(b.att, r.proj, b.x1, D, D, { base: b.u, gate }), norm(b.x1, r.ln2, b.a), this.#op(ROUTER, [g, s, b.a, r.depth, r.router, b.rl, b.st], (rows) => [rows]), this.#op(ADMIT, [s, b.st], () => [1]), this.#op(ROUTE, [g, s, b.rl, pool.gate, b.route, b.st], (rows) => [Math.ceil(rows / 64)]), this.#op(CAPACITY, [g, s, b.route, b.st], () => [1]), this.#op(EXPERT13, [
+      ops.push(this.#op(ADAPTER, [g, b.h, b.x, w.adapter, b.u], (rows) => [D / 64, Math.ceil(rows / 8)]), norm(b.u, r.ln1, b.a), qmm(b.a, r.qkv, b.qkv, D, QKV), ropeKv(slot), attn(slot, gate), qmm(b.att, r.proj, b.x1, D, D, { base: b.u, gate }), norm(b.x1, r.ln2, b.a), this.#op(ROUTER, [g, s, b.a, r.depth, r.router, b.rl, b.st], (rows) => [rows]), this.#op(ADMIT, [s, b.st, g], () => [1]), this.#op(ROUTE, [g, s, b.rl, pool.gate, b.route, b.st], (rows) => [Math.ceil(rows / 64)]), this.#op(CAPACITY, [g, s, b.route, b.st], () => [1]), this.#op(EXPERT13, [
         g,
         s,
         b.a,
@@ -1005,7 +1026,7 @@ class Engine {
         b.route,
         b.eh,
         b.st
-      ], (rows) => [2048 / 64, rows * 8]), this.#op(EXPERT2, [g, s, b.eh, pool.w2.codes, pool.w2.scales, b.route, b.x1, b.h, b.st], (rows) => [D / 64, rows]), this.#op(EXIT, [g, s, b.h, w.lnf, w.halt, b.yf, b.st], (rows) => [rows]), qmm(b.yf, w.emb, b.logits, D, 265, { gate: ST.NEWLY + n, rows1: 1 }));
+      ], (rows) => [2048 / 64, rows * 32]), this.#op(EXPERT2, [g, s, b.eh, pool.w2.codes, pool.w2.scales, b.route, b.x1, b.h, b.st], (rows) => [D / 64, rows]), this.#op(EXIT, [g, s, b.h, w.lnf, w.halt, b.yf, b.st], (rows) => [rows]), qmm(b.yf, w.emb, b.logits, D, 265, { gate: ST.NEWLY + n, rows1: 1 }));
     }
     this.ops = ops;
   }
@@ -1034,7 +1055,12 @@ class Engine {
     this.#trim(this.block - rows);
     const q = this.device.queue;
     q.writeBuffer(this.b.ids, 0, new Uint32Array(ids));
-    q.writeBuffer(this.g, 0, new Uint32Array([rows, this.offset, 0, 0]));
+    if (!(this.topK >= 1 && this.topK <= 32))
+      throw new Error(`experts per byte must be 1 to 32, not ${this.topK}`);
+    if (!(this.least >= 1 && this.least <= this.most && this.most <= this.maxSteps)) {
+      throw new Error(`recurrence ${this.least} to ${this.most}: at least 1, at most ${this.maxSteps}, least ≤ most`);
+    }
+    q.writeBuffer(this.g, 0, new Uint32Array([rows, this.offset, this.topK, this.least | this.most << 16]));
     const enc = this.device.createCommandEncoder();
     const pass = enc.beginComputePass();
     for (const op of this.ops) {
@@ -1331,6 +1357,13 @@ async function load() {
     $("load").disabled = false;
   }
 }
+function clampInput(id, lo, hi, fallback) {
+  const raw = Math.round(Number($(id).value));
+  const v = Number.isFinite(raw) && $(id).value !== "" ? Math.max(lo, Math.min(hi, raw)) : fallback;
+  $(id).value = v;
+  return v;
+}
+var DEFAULTS = { topK: 32, least: 1, most: 24, maxNew: 512 };
 function setChatEnabled(on) {
   $("input").disabled = !on || busy;
   $("send").disabled = !on || busy;
@@ -1361,7 +1394,10 @@ async function send(text) {
   el.classList.add("writing");
   const span = el.querySelector(".text");
   const prompt = encode(buildPrompt(messages, Math.floor(engine.block * 0.9)));
-  const maxNew = Math.max(1, Math.min(2000, Number($("maxNew").value) || 512));
+  const maxNew = clampInput("maxNew", 1, 2000, 512);
+  engine.topK = clampInput("topK", 1, 32, 32);
+  engine.least = clampInput("least", 1, engine.maxSteps, 1);
+  engine.most = clampInput("most", engine.least, engine.maxSteps, engine.maxSteps);
   const out = new TextOut;
   let reply = "", n = 0, passes = 0, tStart = 0, ended = "";
   const t0 = performance.now();
@@ -1390,7 +1426,7 @@ async function send(text) {
     const meta = document.createElement("span");
     meta.className = "meta";
     const why = { end: "", cap: " · stopped at the length limit", stopped: " · stopped" }[ended] ?? "";
-    meta.textContent = `${n} bytes · ${(n / s).toFixed(1)} bytes/s · read ${prompt.length} in ` + `${((tStart - t0) / 1000).toFixed(1)} s · ${n ? (passes / n).toFixed(1) : 0} passes per byte${why}`;
+    meta.textContent = `${n} bytes · ${(n / s).toFixed(1)} bytes/s · read ${prompt.length} in ` + `${((tStart - t0) / 1000).toFixed(1)} s · ${n ? (passes / n).toFixed(1) : 0} passes per byte · ` + `${engine.topK} experts per byte${why}`;
     el.append(meta);
     messages.push({ role: "assistant", content: reply });
     $("genStatus").textContent = "";
@@ -1434,6 +1470,10 @@ var autosize = () => {
 $("input").addEventListener("input", autosize);
 $("stop").addEventListener("click", () => {
   stopAsked = true;
+});
+$("resetSettings").addEventListener("click", () => {
+  for (const [id, v] of Object.entries(DEFAULTS))
+    $(id).value = v;
 });
 $("newChat").addEventListener("click", () => {
   messages = [];
