@@ -5,6 +5,7 @@
  "quant_scope": "all",
  "n_experts": 32,
  "chat_format": "chatml",
+ "bytes": 32638048,
  "cfg": {
   "vocab_size": 265,
   "d_model": 512,
