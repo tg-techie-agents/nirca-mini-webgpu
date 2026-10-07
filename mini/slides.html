@@ -588,7 +588,9 @@ for (const s of slides) {
 
 // → space PageDown click: next · ← PageUp: back · Home End · F: fullscreen · N: speaker notes
 const stage = document.getElementById("stage");
-let at = Math.min(slides.length - 1, Math.max(0, (parseInt(location.hash.slice(1), 10) || 1) - 1));
+// the slide is the hash: read on load, and again when only the hash changes (no reload then)
+const fromHash = () => (parseInt(location.hash.slice(1), 10) || 1) - 1;
+let at = Math.min(slides.length - 1, Math.max(0, fromHash()));
 function show(i) {
   at = Math.min(slides.length - 1, Math.max(0, i));
   slides.forEach((s, j) => s.classList.toggle("on", j === at));
@@ -601,6 +603,7 @@ function fit() {
   stage.style.transform = `translate(-50%, -50%) scale(${k})`;
 }
 addEventListener("resize", fit);
+addEventListener("hashchange", () => { if (fromHash() !== at) show(fromHash()); });
 addEventListener("keydown", (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key;
