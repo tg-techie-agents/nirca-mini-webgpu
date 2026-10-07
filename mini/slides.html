@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22%3E%3Ccircle cx=%228%22 cy=%228%22 r=%227%22 fill=%22%232f5d50%22/%3E%3C/svg%3E">
+<title>Nirca Mini Talk</title>
+<style>
+  /* A 1600×900 stage, scaled to fit the window; one slide shows at a time. */
+  :root { --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1c1a; --muted: #6d6a63; --line: #e3e0d8;
+    --accent: #2f5d50; --soft: #e9efe9; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #111; overflow: hidden; }
+  body { font-family: ui-sans-serif, -apple-system, "Segoe UI", sans-serif; color: var(--ink); }
+  #stage { position: absolute; left: 50%; top: 50%; width: 1600px; height: 900px; background: var(--bg);
+    transform-origin: center; }
+  .slide { position: absolute; inset: 0; padding: 90px 110px; display: none; flex-direction: column; }
+  .slide.on { display: flex; }
+  h1 { font-size: 92px; line-height: 1.05; margin: 0 0 24px; letter-spacing: -0.02em; }
+  h2 { font-size: 64px; margin: 0 0 44px; letter-spacing: -0.015em; }
+  p, li { font-size: 40px; line-height: 1.35; margin: 0 0 22px; max-width: 30em; }
+  ul { margin: 0; padding-left: 1.1em; }
+  li { margin-bottom: 18px; }
+  .muted { color: var(--muted); }
+  .accent { color: var(--accent); }
+  .big { font-size: 52px; }
+  .row { display: flex; gap: 70px; align-items: center; flex: 1; }
+  .grow { flex: 1; }
+  .qr { width: 380px; height: 380px; background: #fff; padding: 10px; border-radius: 16px; }
+  .qr svg { width: 100%; height: 100%; display: block; }
+  .url { font: 600 46px ui-monospace, Menlo, monospace; color: var(--accent); }
+  svg text { fill: var(--ink); font-family: ui-sans-serif, -apple-system, "Segoe UI", sans-serif; }
+  .box { fill: var(--panel); stroke: var(--line); stroke-width: 2; }
+  .key { fill: var(--soft); stroke: var(--accent); stroke-width: 2; }
+  svg .small { fill: var(--muted); }
+  .arrow { stroke: var(--accent); stroke-width: 2; fill: none; marker-end: url(#head); }
+  #head path, #head2 path { fill: var(--accent); }
+  .diagram svg { width: 100%; height: auto; }
+  .diagram svg text { font-size: 13px; } .diagram svg .small { font-size: 11px; }
+  .quote { border-left: 8px solid var(--accent); padding-left: 32px; }
+  .notes { display: none; }
+  #notes { position: fixed; left: 0; right: 0; bottom: 0; max-height: 40vh; overflow: auto; background: #1d1c1a;
+    color: #ecebe6; font: 18px/1.5 ui-sans-serif, -apple-system, sans-serif; padding: 14px 20px; display: none; }
+  body.shownotes #notes { display: block; }
+  #count { position: fixed; right: 14px; bottom: 10px; color: #888; font: 13px ui-sans-serif, sans-serif; }
+  body.shownotes #count { display: none; }
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <section class="slide">
+    <div class="row">
+      <div class="grow">
+        <h1>Nirca Mini</h1>
+        <p class="big muted">A chat model trained from scratch on a Mac, running in your browser</p>
+        <p class="url">tinyurl.com/2y8xft2k</p>
+      </div>
+      <div class="qr" aria-label="QR code for tinyurl.com/2y8xft2k"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 33 33" shape-rendering="crispEdges" class="segno"><path fill="#fff" d="M0 0h33v33h-33z"/><path class="qrline" stroke="#1d1c1a" d="M2 2.5h7m1 0h1m2 0h2m4 0h3m2 0h7m-29 1h1m5 0h1m1 0h2m1 0h4m1 0h1m1 0h2m2 0h1m5 0h1m-29 1h1m1 0h3m1 0h1m1 0h2m3 0h1m4 0h3m1 0h1m1 0h3m1 0h1m-29 1h1m1 0h3m1 0h1m1 0h1m2 0h1m3 0h2m1 0h2m2 0h1m1 0h3m1 0h1m-29 1h1m1 0h3m1 0h1m1 0h1m4 0h1m1 0h1m1 0h1m1 0h1m2 0h1m1 0h3m1 0h1m-29 1h1m5 0h1m2 0h3m1 0h1m2 0h1m2 0h2m1 0h1m5 0h1m-29 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-21 1h1m1 0h1m1 0h1m1 0h1m2 0h3m-19 1h2m1 0h1m1 0h2m1 0h2m1 0h1m5 0h2m2 0h1m1 0h5m-29 1h3m6 0h1m1 0h1m4 0h1m5 0h2m2 0h1m1 0h1m-29 1h4m2 0h1m2 0h1m1 0h1m6 0h1m1 0h1m2 0h3m1 0h2m-28 1h1m2 0h2m1 0h1m2 0h1m1 0h3m1 0h9m2 0h1m-28 1h1m4 0h3m2 0h1m2 0h3m1 0h1m2 0h1m1 0h2m-23 1h3m1 0h1m5 0h4m1 0h3m1 0h4m3 0h2m-29 1h2m1 0h2m1 0h2m1 0h2m3 0h1m1 0h1m1 0h1m1 0h1m2 0h1m2 0h3m-27 1h1m5 0h1m3 0h1m1 0h1m2 0h1m1 0h3m1 0h1m4 0h1m-27 1h1m1 0h3m3 0h1m1 0h5m1 0h1m2 0h3m1 0h1m2 0h1m-27 1h3m2 0h1m2 0h2m1 0h1m1 0h3m2 0h1m1 0h1m3 0h3m-29 1h1m3 0h1m1 0h3m1 0h2m3 0h2m3 0h2m3 0h4m-28 1h1m3 0h1m6 0h1m1 0h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h1m-28 1h1m1 0h2m2 0h1m1 0h3m1 0h1m1 0h4m2 0h5m2 0h1m-20 1h1m3 0h2m4 0h1m1 0h1m3 0h1m2 0h2m-29 1h7m1 0h4m4 0h2m1 0h2m1 0h1m1 0h1m1 0h3m-29 1h1m5 0h1m4 0h1m1 0h4m3 0h1m3 0h1m2 0h2m-29 1h1m1 0h3m1 0h1m1 0h5m1 0h2m4 0h6m1 0h1m-28 1h1m1 0h3m1 0h1m2 0h2m1 0h1m2 0h1m1 0h1m2 0h2m2 0h1m1 0h1m-27 1h1m1 0h3m1 0h1m1 0h3m1 0h2m3 0h3m3 0h3m2 0h1m-29 1h1m5 0h1m1 0h2m1 0h1m1 0h1m1 0h1m1 0h1m1 0h5m1 0h1m1 0h1m-28 1h7m3 0h1m1 0h3m1 0h2m1 0h2m1 0h1m1 0h2m1 0h2"/></svg></div>
+    </div>
+    <div class="notes">Open with the link up so people can scan it now and try along. One line: a small
+      model, trained from scratch, that runs entirely on your own GPU.</div>
+  </section>
+
+  <section class="slide">
+    <h2>What it is</h2>
+    <ul>
+      <li>A small chat model from <strong>Nirca</strong>, a project that trains models from scratch on a Mac</li>
+      <li>Made to be good company: a buddy who helps you think things through</li>
+      <li>109 million weights, a <strong>33 MB</strong> download</li>
+      <li>Runs on your own GPU with WebGPU: nothing you type leaves the page</li>
+    </ul>
+    <div class="notes">It's an experiment in how far careful training takes a small model, not a
+      product. It's small and it says odd things; that's part of the point.</div>
+  </section>
+
+  <section class="slide">
+    <h2>The model in one picture</h2>
+    <svg viewBox="0 0 1380 520" role="img" aria-label="Bytes go in, through two layers, then a looped block with 32 experts that repeats until the model is sure, then the next byte comes out.">
+      <defs><marker id="head2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+      <rect class="box" x="0" y="190" width="200" height="120" rx="16"/>
+      <text x="100" y="242" text-anchor="middle" font-size="32">a byte</text>
+      <text class="small" x="100" y="280" text-anchor="middle" font-size="24">no tokenizer</text>
+      <rect class="box" x="270" y="190" width="220" height="120" rx="16"/>
+      <text x="380" y="242" text-anchor="middle" font-size="32">2 layers</text>
+      <text class="small" x="380" y="280" text-anchor="middle" font-size="24">attention + MLP</text>
+      <rect class="key" x="560" y="150" width="460" height="200" rx="18"/>
+      <text x="790" y="205" text-anchor="middle" font-size="32">one looped block</text>
+      <text class="small" x="790" y="250" text-anchor="middle" font-size="24">32 experts, 8 used per byte</text>
+      <text class="small" x="790" y="290" text-anchor="middle" font-size="24">weights are −1, 0 or +1</text>
+      <path d="M700,150 C700,40 880,40 880,150" stroke="#2f5d50" stroke-width="3" fill="none" marker-end="url(#head2)"/>
+      <text x="790" y="40" text-anchor="middle" font-size="26" fill="#2f5d50">runs 1–24 times, stops when it's sure</text>
+      <rect class="box" x="1090" y="190" width="270" height="120" rx="16"/>
+      <text x="1225" y="242" text-anchor="middle" font-size="32">the next byte</text>
+      <text class="small" x="1225" y="280" text-anchor="middle" font-size="24">2,048-byte context</text>
+      <path d="M200,250 L266,250" stroke="#2f5d50" stroke-width="3" marker-end="url(#head2)"/>
+      <path d="M490,250 L556,250" stroke="#2f5d50" stroke-width="3" marker-end="url(#head2)"/>
+      <path d="M1020,250 L1086,250" stroke="#2f5d50" stroke-width="3" marker-end="url(#head2)"/>
+      <text class="small" x="790" y="440" text-anchor="middle" font-size="26">Harder bytes get more passes: the model decides how hard it thinks.</text>
+    </svg>
+    <div class="notes">Three ideas: it reads raw bytes, not words; one block is reused in a loop and the
+      model chooses how many times (adaptive halting); and the weights are ternary, which is why the
+      whole model is 33 MB.</div>
+  </section>
+
+  <section class="slide">
+    <h2>How it's trained</h2>
+    <div class="diagram"><svg viewBox="0 0 720 300" role="img" aria-labelledby="dtitle">
+    <title id="dtitle">Training: two data sources pass a leak sweep into the trainer, which writes
+      checkpoints; checkpoints are scored, and one is published to this page.</title>
+    <defs><marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
+    <rect class="box" x="10" y="20" width="200" height="74" rx="10"/>
+    <text x="24" y="44">SmolTalk-2 conversations</text>
+    <text class="small" x="24" y="62">open chat data, cut to</text>
+    <text class="small" x="24" y="77">chats of at most 2,048 bytes</text>
+    <rect class="box" x="10" y="120" width="200" height="74" rx="10"/>
+    <text x="24" y="144">Synthetic chats</text>
+    <text class="small" x="24" y="162">written by open models,</text>
+    <text class="small" x="24" y="177">steered by the charter</text>
+    <rect class="box" x="260" y="70" width="170" height="74" rx="10"/>
+    <text x="274" y="94">Leak sweep</text>
+    <text class="small" x="274" y="112">drops chats that share text</text>
+    <text class="small" x="274" y="127">with the held-out test sets</text>
+    <rect class="box" x="480" y="70" width="230" height="74" rx="10"/>
+    <text x="494" y="94">Trainer</text>
+    <text class="small" x="494" y="112">trains the model on the mix,</text>
+    <text class="small" x="494" y="127">on one Mac</text>
+    <rect class="box" x="480" y="200" width="230" height="74" rx="10"/>
+    <text x="494" y="224">Checkpoints</text>
+    <text class="small" x="494" y="242">copies of the model saved</text>
+    <text class="small" x="494" y="257">as it trains</text>
+    <rect class="box" x="260" y="200" width="170" height="74" rx="10"/>
+    <text x="274" y="224">Scoring and grading</text>
+    <text class="small" x="274" y="242">held-out loss, and graded</text>
+    <text class="small" x="274" y="257">sample chats</text>
+    <rect class="key" x="10" y="220" width="200" height="54" rx="10"/>
+    <text x="24" y="244">This page</text>
+    <text class="small" x="24" y="261">one chosen checkpoint</text>
+    <path class="arrow" d="M210,57 C235,57 235,100 258,100"/>
+    <path class="arrow" d="M210,157 C235,157 235,115 258,115"/>
+    <path class="arrow" d="M430,107 L478,107"/>
+    <path class="arrow" d="M595,144 L595,198"/>
+    <path class="arrow" d="M480,237 L432,237"/>
+    <path class="arrow" d="M260,237 L212,247"/>
+  </svg></div>
+    <div class="notes">Two kinds of data: open chat data (SmolTalk-2, chats up to 2,048 bytes) and
+      synthetic chats, where two open models play a person and Nirca Mini. A leak sweep drops anything
+      that overlaps the test sets. The checkpoint on the page is step 62,377; about 7% of what it read
+      in that stretch was synthetic.</div>
+  </section>
+
+  <section class="slide">
+    <h2>The charter</h2>
+    <p class="quote big">“Your job is to be good company: a friendly companion, and above all a buddy who helps
+      people think things through.”</p>
+    <p>Values, in order: honesty, kindness, clarity, curiosity, respect.</p>
+    <p class="quote">“An honest ‘I’m not sure’ beats a confident, kind-sounding answer.”</p>
+    <div class="notes">The charter steers the synthetic chats: the model playing Nirca Mini is given it.
+      The page sends no system prompt; whatever shows of it, the model learned. The full text is on the
+      overview page.</div>
+  </section>
+
+  <section class="slide">
+    <h2>Live demo</h2>
+    <ul>
+      <li>Open <span class="url">tinyurl.com/2y8xft2k</span></li>
+      <li>Load model: 33 MB once, then cached</li>
+      <li>Chat: it runs on your GPU, in the page</li>
+      <li>Replies match Nirca's own reference code, step for step</li>
+    </ul>
+    <div class="notes">Switch to the chat tab. Load, then try "hi" and "What is the capital of France?".
+      Open Settings to show experts per byte. Needs Chrome or Edge with WebGPU. If the demo stalls, the
+      slides still make the point.</div>
+  </section>
+
+  <section class="slide">
+    <h2>What's next</h2>
+    <ul>
+      <li>The newest Nirca Mini published on Hugging Face, and the page loading it</li>
+      <li>Training continues, on chats written under the current charter</li>
+      <li>Try it, and tell us where it's wrong</li>
+    </ul>
+    <p class="url" style="margin-top:40px">tinyurl.com/2y8xft2k</p>
+    <div class="notes">Close on the link. The checkpoint in the browser today is from the first day of
+      training; newer ones will follow.</div>
+  </section>
+
+</div>
+<div id="notes"></div>
+<div id="count"></div>
+<script>
+  // → space PageDown click: next · ← PageUp: back · Home End · F: fullscreen · N: speaker notes
+  const slides = [...document.querySelectorAll(".slide")];
+  const stage = document.getElementById("stage");
+  let at = Math.min(slides.length - 1, Math.max(0, (parseInt(location.hash.slice(1), 10) || 1) - 1));
+  function show(i) {
+    at = Math.min(slides.length - 1, Math.max(0, i));
+    slides.forEach((s, j) => s.classList.toggle("on", j === at));
+    document.getElementById("notes").textContent = slides[at].querySelector(".notes")?.textContent.replace(/\s+/g, " ").trim() ?? "";
+    document.getElementById("count").textContent = `${at + 1} / ${slides.length} · N notes · F fullscreen`;
+    history.replaceState(null, "", `#${at + 1}`);
+  }
+  function fit() {
+    const k = Math.min(innerWidth / 1600, innerHeight / 900);
+    stage.style.transform = `translate(-50%, -50%) scale(${k})`;
+  }
+  addEventListener("resize", fit);
+  addEventListener("keydown", (e) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const k = e.key;
+    if (["ArrowRight", "ArrowDown", " ", "PageDown"].includes(k)) show(at + 1);
+    else if (["ArrowLeft", "ArrowUp", "PageUp"].includes(k)) show(at - 1);
+    else if (k === "Home") show(0);
+    else if (k === "End") show(slides.length - 1);
+    else if (k === "f" || k === "F") {
+      // the browser refuses fullscreen without a real keypress or click; nothing to do then
+      (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen?.())?.catch(() => {});
+    }
+    else if (k === "n" || k === "N") document.body.classList.toggle("shownotes");
+    else return;
+    e.preventDefault();
+  });
+  stage.addEventListener("click", (e) => show(e.clientX < innerWidth / 4 ? at - 1 : at + 1));
+  fit(); show(at);
+</script>
+</body>
+</html>
