@@ -1217,11 +1217,28 @@ async function* generate(engine, prompt, maxNew, end, { record = false, stop } =
 }
 
 // web/app.js
-var DEFAULT_WEIGHTS = "weights/";
-var WEIGHTS = (() => {
-  const u = new URLSearchParams(location.search).get("weights") ?? DEFAULT_WEIGHTS;
-  return u.endsWith("/") ? u : u + "/";
-})();
+var PUBLISHED_WEIGHTS = "https://tg-techie-agents.github.io/nirca-mini-webgpu/weights/";
+var slash = (u) => u.endsWith("/") ? u : u + "/";
+function weightCandidates() {
+  const given = new URLSearchParams(location.search).get("weights");
+  if (given)
+    return [slash(given)];
+  return location.protocol === "file:" ? [PUBLISHED_WEIGHTS] : ["weights/", PUBLISHED_WEIGHTS];
+}
+async function findWeights() {
+  const tried = [];
+  for (const base of weightCandidates()) {
+    try {
+      const res = await fetch(`${base}config.json`, { cache: "no-cache" });
+      if (res.ok)
+        return [base, await res.json()];
+      tried.push(`${base}config.json: HTTP ${res.status}`);
+    } catch (e) {
+      tried.push(`${base}config.json: ${e.message ?? e}`);
+    }
+  }
+  throw new Error(`no model config found (${tried.join("; ")})`);
+}
 var CACHE = "nirca-mini-weights-v1";
 var $ = (id) => document.getElementById(id);
 var engine = null;
@@ -1237,7 +1254,7 @@ function setLoad(text, frac, error = false) {
   }
 }
 var mb = (n) => (n / 1e6).toFixed(1);
-async function fetchWeights(url, key, onProgress) {
+async function fetchWeights(url, key, size, onProgress) {
   let cache = null;
   try {
     cache = await caches.open(CACHE);
@@ -1248,7 +1265,7 @@ async function fetchWeights(url, key, onProgress) {
   const res = await fetch(url);
   if (!res.ok)
     throw new Error(`downloading ${url}: HTTP ${res.status}`);
-  const total = Number(res.headers.get("content-length")) || 0;
+  const total = size || 0;
   const reader = res.body.getReader();
   const parts = [];
   let got = 0;
@@ -1290,13 +1307,10 @@ async function load() {
       setChatEnabled(false);
     });
     setLoad("Reading the model's config…", 0);
-    const cfgRes = await fetch(`${WEIGHTS}config.json`, { cache: "no-cache" });
-    if (!cfgRes.ok)
-      throw new Error(`no model config at ${WEIGHTS}config.json (HTTP ${cfgRes.status})`);
-    const manifest = await cfgRes.json();
+    const [WEIGHTS, manifest] = await findWeights();
     const version = `${manifest.name ?? "model"}@${manifest.step ?? "?"}`;
     const t0 = performance.now();
-    const { buffer, cached } = await fetchWeights(`${WEIGHTS}model.safetensors`, `${new URL(WEIGHTS, location.href)}model.safetensors?v=${encodeURIComponent(version)}`, (got, total) => setLoad(`Downloading weights: ${mb(got)} of ${mb(total)} MB`, total ? got / total * 0.9 : null));
+    const { buffer, cached } = await fetchWeights(`${WEIGHTS}model.safetensors`, `${new URL(WEIGHTS, location.href)}model.safetensors?v=${encodeURIComponent(version)}`, manifest.bytes, (got, total) => setLoad(total ? `Downloading weights: ${mb(got)} of ${mb(total)} MB` : `Downloading weights: ${mb(got)} MB`, total ? got / total * 0.9 : null));
     const t1 = performance.now();
     setLoad("Loading onto the GPU…", 0.95);
     const e = await Engine.create(device, buffer, manifest);
