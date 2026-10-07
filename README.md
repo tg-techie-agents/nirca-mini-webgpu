@@ -7,7 +7,9 @@ Open the page, click **Load model** (a 33 MB download, cached after the first ti
 You need a browser with WebGPU, such as a recent Chrome or Edge.
 
 - `index.html`: the page, one self-contained file.
-- `backup.html`: an untouched copy of the page as first published.
+- `overview.html`: about the model, how it was trained, and its charter.
+- `nirca-mini-charter-6.md`: the charter, as a plain file.
+- `backup.html`: a frozen copy of the page.
 - `weights/`: the model the page loads by default (`config.json` and `model.safetensors`). To load
   other weights, open `index.html?weights=URL`, where `URL` is a folder holding those two files.
 
