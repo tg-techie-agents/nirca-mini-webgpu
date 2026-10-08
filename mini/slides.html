@@ -69,7 +69,7 @@
   </section>
 
   <!-- 2 -->
-  <section class="slide">
+  <section class="slide" data-dated="2026-10-07">
     <p class="kicker">The idea · 2026-10-03</p>
     <h2>Train it from scratch, ternary from step one</h2>
     <div class="split">
@@ -89,8 +89,8 @@
   </section>
 
   <!-- 3 -->
-  <section class="slide">
-    <p class="kicker">What was built</p>
+  <section class="slide" data-dated="2026-10-07">
+    <p class="kicker">What was built · as of 2026-10-07</p>
     <h2>Bytes in, one looping block, bytes out</h2>
     <div class="visual" style="margin-top:20px"><svg id="v-model" viewBox="0 0 1380 420"></svg></div>
     <ul class="points" style="margin-top:20px; columns:3; column-gap:50px; font-size:30px">
@@ -104,7 +104,7 @@
   </section>
 
   <!-- 4 -->
-  <section class="slide">
+  <section class="slide" data-dated="2026-10-07">
     <p class="kicker">Make the number bigger · 2026-10-04 to 10-06</p>
     <h2>Grow until it stops paying</h2>
     <div class="visual"><svg id="v-grow" viewBox="0 0 1400 470"></svg></div>
@@ -119,8 +119,8 @@
   </section>
 
   <!-- 5 -->
-  <section class="slide">
-    <p class="kicker">What went wrong: rigor</p>
+  <section class="slide" data-dated="2026-10-07">
+    <p class="kicker">What went wrong: rigor · 2026-10-04 to 10-07</p>
     <h2>Every failure became a mechanism</h2>
     <div class="visual"><svg id="v-rigor" viewBox="0 0 1400 520"></svg></div>
     <div class="notes">Test data leaked into training again and again, in ways that got subtler each time: whole
@@ -129,8 +129,8 @@
   </section>
 
   <!-- 6 -->
-  <section class="slide">
-    <p class="kicker">What went wrong: autonomy</p>
+  <section class="slide" data-dated="2026-10-07">
+    <p class="kicker">What went wrong: autonomy · 2026-10-05 to 10-07</p>
     <h2>Make it run while nobody watches</h2>
     <div class="visual"><svg id="v-auto" viewBox="0 0 1400 520"></svg></div>
     <div class="notes">The goal moved to hands-off: programs do the routine work, an alert wakes the lead agent, and
@@ -139,8 +139,8 @@
   </section>
 
   <!-- 6b -->
-  <section class="slide">
-    <p class="kicker">How it runs</p>
+  <section class="slide" data-dated="2026-10-07">
+    <p class="kicker">How it runs · 2026-10-07</p>
     <h2 style="margin-bottom:16px">Programs do the routine; people decide</h2>
     <div class="visual sys"><svg class="system" viewBox="0 0 1400 680" role="img" aria-labelledby="sysTitle">
 <title id="sysTitle">How the training system's parts act on each other while it runs</title>
@@ -278,7 +278,7 @@
   </section>
 
   <!-- 7 -->
-  <section class="slide">
+  <section class="slide" data-dated="2026-10-07">
     <p class="kicker">Change of course · 2026-10-07</p>
     <h2>Smaller, shorter, and only chat</h2>
     <div class="split">
@@ -297,8 +297,8 @@
   </section>
 
   <!-- 8 -->
-  <section class="slide">
-    <p class="kicker">The charter</p>
+  <section class="slide" data-dated="2026-10-07">
+    <p class="kicker">The charter · 2026-10-07</p>
     <h2>Teach intent, not rules</h2>
     <div class="split">
       <div class="visual"><svg id="v-charter" viewBox="0 0 900 480"></svg></div>
@@ -316,9 +316,9 @@
   </section>
 
   <!-- 9 -->
-  <section class="slide">
-    <p class="kicker">Where it stands · honestly</p>
-    <h2>It has learned the shape of a chat, not yet the sense</h2>
+  <section class="slide" data-dated="2026-10-07">
+    <p class="kicker">Where it stood · 2026-10-07, honestly</p>
+    <h2>It had learned the shape of a chat, not yet the sense</h2>
     <div class="split">
       <div class="visual"><svg id="v-stand" viewBox="0 0 960 500"></svg></div>
       <div class="side">
@@ -343,14 +343,14 @@
       <div class="visual"><svg id="v-demo" viewBox="0 0 900 500"></svg></div>
       <div class="side">
         <ul class="points">
-          <li>33 MB, then cached</li>
+          <li><span data-fill="mb">33</span> MB, then cached</li>
           <li>WebGPU: Chrome, Edge, Safari</li>
           <li>Same replies as the reference code</li>
         </ul>
       </div>
     </div>
     <div class="notes">Switch to the chat. It loads on open. Try "hi" and "What is the capital of France?". Nothing
-      leaves the page. If the demo stalls, the point still stands: the whole model is a 33 MB file.</div>
+      leaves the page. If the demo stalls, the point still stands: the whole model is a <span data-fill="mb">33</span> MB file.</div>
   </section>
 
   <!-- 11 -->
@@ -374,7 +374,7 @@
 
 </div>
 <div id="notes"></div>
-<div id="count"></div>
+<div id="count" data-fill="live"></div>
 <script>
 // Numbers from Nirca's training records (2026-10-07, about 19:20): the lineage, validation loss
 // on the chat set, and graded coherence. Public figures only.
@@ -621,6 +621,79 @@ addEventListener("keydown", (e) => {
 });
 stage.addEventListener("click", (e) => show(e.clientX < innerWidth / 4 ? at - 1 : at + 1));
 fit(); show(at);
+</script>
+<script type="module">
+// web/facts.js
+var PUBLISHED_WEIGHTS = "https://tg-techie-agents.github.io/nirca-mini-webgpu/weights/";
+var LATEST_MANIFEST = "https://huggingface.co/nirca/nirca-mini/resolve/main/latest.json";
+function paramsOf(header) {
+  let n = 0;
+  for (const [key, t] of Object.entries(header)) {
+    if (key === "__metadata__")
+      continue;
+    const size = t.shape.reduce((a, b) => a * b, 1);
+    if (key.endsWith(".codes"))
+      n += size * 16;
+    else if (!key.endsWith(".scales") && !key.endsWith(".biases"))
+      n += size;
+  }
+  return n;
+}
+async function headerAt(url) {
+  const part = async (from, to) => {
+    const res = await fetch(url, { headers: { Range: `bytes=${from}-${to}` } });
+    if (res.status !== 206)
+      throw new Error(`${url}: no range support (HTTP ${res.status})`);
+    return new Uint8Array(await res.arrayBuffer());
+  };
+  const n = Number(new DataView((await part(0, 7)).buffer).getBigUint64(0, true));
+  return JSON.parse(new TextDecoder().decode(await part(8, 8 + n - 1)));
+}
+var num = (n) => Number(n).toLocaleString("en-US");
+function facts(config, params) {
+  const cfg = config.cfg ?? {};
+  const f = {
+    step: num(config.step),
+    mb: Math.round((config.bytes ?? 0) / 1e6).toString(),
+    experts: num(cfg.pool_experts),
+    topk: num(cfg.pool_top_k),
+    passes: num(cfg.max_steps),
+    prelude: num(cfg.n_prelude),
+    context: num(cfg.block)
+  };
+  if (params)
+    Object.assign(f, { params: `${Math.round(params / 1e6)} million`, paramsM: `${Math.round(params / 1e6)}M` });
+  return f;
+}
+function fill(root, f) {
+  for (const el of root.querySelectorAll("[data-fill]")) {
+    const v = f[el.dataset.fill];
+    if (v !== undefined && !v.includes("NaN") && v !== "undefined")
+      el.textContent = v;
+  }
+}
+async function newestFacts() {
+  for (const [manifest, folder] of [[LATEST_MANIFEST, (m) => m.checkpoint ?? m.url ?? "."], [PUBLISHED_WEIGHTS + "config.json", () => "."]]) {
+    try {
+      const res = await fetch(manifest, { cache: "no-cache" });
+      if (!res.ok)
+        continue;
+      const config = await res.json();
+      if (!(Number.isInteger(config.step) && config.cfg))
+        continue;
+      const base = new URL(folder(config), manifest).href.replace(/\/?$/, "/");
+      let params = null;
+      try {
+        params = paramsOf(await headerAt(base + "model.safetensors"));
+      } catch {}
+      return facts(config, params);
+    } catch {}
+  }
+  return null;
+}
+
+// web/facts-page.js
+newestFacts().then((f) => f && fill(document, f));
 </script>
 </body>
 </html>

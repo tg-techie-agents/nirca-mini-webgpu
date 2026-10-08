@@ -63,30 +63,32 @@
   <h2>The model</h2>
   <div class="panel">
     <dl>
-      <dt>Size</dt><dd>About 109 million weights, a 33 MB download.</dd>
+      <dt>Size</dt><dd>About <span data-fill="params">109 million</span> weights, a <span data-fill="mb">33</span> MB download.</dd>
       <dt>Text</dt><dd>Byte-level: it reads and writes one byte at a time, with no tokenizer.</dd>
-      <dt>Weights</dt><dd>Ternary: each weight is −1, 0 or +1, with a scale per block of 128.</dd>
-      <dt>Experts</dt><dd>A mixture of experts: 32 experts, of which each byte uses 8, as trained.</dd>
-      <dt>Depth</dt><dd>Two ordinary layers, then one looped block that runs up to 24 times per byte.
-        The model decides for itself when to stop (adaptive halting), so harder bytes get more passes.</dd>
-      <dt>Context</dt><dd>2,048 bytes, about 2,000 characters of English.</dd>
+      <dt>Weights</dt><dd>Ternary: each weight is −1, 0 or +1, with a scale per block of weights.</dd>
+      <dt>Experts</dt><dd>A mixture of experts: <span data-fill="experts">32</span> experts, of which each byte uses
+        <span data-fill="topk">8</span>, as trained.</dd>
+      <dt>Depth</dt><dd><span data-fill="prelude">2</span> ordinary layers, then one looped block that runs up to
+        <span data-fill="passes">24</span> times per byte. The model decides for itself when to stop (adaptive
+        halting), so harder bytes get more passes.</dd>
+      <dt>Context</dt><dd><span data-fill="context">2,048</span> bytes, roughly as many characters of English.</dd>
     </dl>
   </div>
 
   <h2>How it came to be</h2>
-  <p>On 2026-10-07, Nirca Mini began as a cut-down copy of nirca-0, a larger Nirca model, and was
-    trained from there on short chats. The copy on this page is step 62,377, from the afternoon of
-    that first day of training.</p>
+  <p>On 2026-10-07, Nirca Mini began as a cut-down copy of nirca-0, a larger Nirca model, and has
+    trained since on short chats. The copy on this page is step <span data-fill="step">62,377</span>; the page
+    loads newer checkpoints as they are published.</p>
 
   <h2>How it is trained</h2>
   <div class="diagram"><svg viewBox="0 0 720 300" role="img" aria-labelledby="dtitle">
-    <title id="dtitle">Training: two data sources pass a leak sweep into the trainer, which writes
-      checkpoints; checkpoints are scored, and one is published to this page.</title>
+    <title id="dtitle">Training: the data passes a leak sweep into the trainer, which writes
+      checkpoints; checkpoints are scored and published to this page.</title>
     <defs><marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
     <rect class="box" x="10" y="20" width="200" height="74" rx="10"/>
     <text x="24" y="44">SmolTalk-2 conversations</text>
     <text class="small" x="24" y="62">open chat data, cut to</text>
-    <text class="small" x="24" y="77">chats of at most 2,048 bytes</text>
+    <text class="small" x="24" y="77">chats that fit the context</text>
     <rect class="box" x="10" y="120" width="200" height="74" rx="10"/>
     <text x="24" y="144">Synthetic chats</text>
     <text class="small" x="24" y="162">written by open models,</text>
@@ -109,7 +111,7 @@
     <text class="small" x="274" y="257">sample chats</text>
     <rect class="key" x="10" y="220" width="200" height="54" rx="10"/>
     <text x="24" y="244">This page</text>
-    <text class="small" x="24" y="261">one chosen checkpoint</text>
+    <text class="small" x="24" y="261">each published checkpoint</text>
     <path class="arrow" d="M210,57 C235,57 235,100 258,100"/>
     <path class="arrow" d="M210,157 C235,157 235,115 258,115"/>
     <path class="arrow" d="M430,107 L478,107"/>
@@ -118,21 +120,22 @@
     <path class="arrow" d="M260,237 L212,247"/>
   </svg></div>
 
-  <p>What step 62,377 was trained on, from Nirca's training records:</p>
+  <p>What the model reads, from Nirca's training records:</p>
   <ul>
-    <li><strong>SmolTalk-2</strong>, Hugging Face's open collection of chats: about 460,000 conversations of at
-      most 2,048 bytes. The leak sweep had dropped about 6,500 more that shared text with held-out
-      evaluation sets.</li>
-    <li><strong>About 1,000 synthetic chats</strong> written by two open models, Gemma 4 31B and Qwen 3.8 27B. In
-      each chat, one model played a person and the other played Nirca Mini, following an earlier draft
-      of the charter below. Chats were filtered before training: replies that question back too often,
-      run too long, or break the charter were redrawn or dropped, and a check dropped chats holding personal details.
-      These made up about 7% of what the model read in that stretch of training.</li>
+    <li><strong>SmolTalk-2</strong>, Hugging Face's open collection of chats, cut to conversations that fit the
+      context. This is most of it.</li>
+    <li><strong>Synthetic chats</strong> written by open models: in each chat, one model plays a person and the
+      other plays Nirca Mini, following the charter below. Chats are filtered before training: replies that
+      question back too often, run too long, or break the charter are redrawn or dropped, and a check drops
+      chats holding personal details.</li>
+    <li>In some checkpoints, a small set of real conversations, anonymised before training.</li>
   </ul>
-  <p>Later checkpoints add chats written under the current charter, at a larger share.</p>
+  <p>Every set is swept for text shared with the held-out test sets before anything trains on it. Which
+    sets, and in what shares, changes from checkpoint to checkpoint.</p>
 
   <h2>The system</h2>
-  <p>Two Macs do the work, mostly on their own. One trains. The other scores each checkpoint against
+  <div data-dated="2026-10-07">
+  <p>As it stood on 2026-10-07: two Macs do the work, mostly on their own. One trains. The other scores each checkpoint against
     data the trainer never sees, serves the model for testing, and shows it all on a site. A supervisor
     program runs the routine; an alert wakes the lead agent; the person decides what only a person
     should. The page you are using needs none of it: a static file and a weights file, on your machine.</p>
@@ -264,6 +267,7 @@
 </g>
 </svg>
 </div>
+  </div>
 
   <!--/ABOUT-->
   <!--CHARTER-TAB-->
@@ -272,8 +276,9 @@
     trained on: the model writing Nirca Mini's side of each chat is given this text. It is not a system
     prompt, and the chat page sends nothing like it. Whatever of it the model shows, it learned from
     the chats.</p>
-  <p>This is the current text, charter 6, published as is. The checkpoint on this page was trained on
-    chats written under earlier drafts of it. Two placeholders are filled in for each synthetic chat:</p>
+  <p>This is charter 6, published as is. Which charter a checkpoint's synthetic chats were written under
+    depends on when it was trained: the first day's, under earlier drafts of this one. Two placeholders are
+    filled in for each synthetic chat:</p>
   <ul>
     <li><code>{question_note}</code>: in some chats, a line telling the model to end its replies without a
       question (at most one in the whole chat); in others, nothing.</li>
@@ -364,5 +369,78 @@ Reply with your next message in the conversation, and nothing else.
   <footer>Page code MIT licensed; see the LICENSE in the repository. The model's weights are not covered
     by that license.</footer>
 </main>
+<script type="module">
+// web/facts.js
+var PUBLISHED_WEIGHTS = "https://tg-techie-agents.github.io/nirca-mini-webgpu/weights/";
+var LATEST_MANIFEST = "https://huggingface.co/nirca/nirca-mini/resolve/main/latest.json";
+function paramsOf(header) {
+  let n = 0;
+  for (const [key, t] of Object.entries(header)) {
+    if (key === "__metadata__")
+      continue;
+    const size = t.shape.reduce((a, b) => a * b, 1);
+    if (key.endsWith(".codes"))
+      n += size * 16;
+    else if (!key.endsWith(".scales") && !key.endsWith(".biases"))
+      n += size;
+  }
+  return n;
+}
+async function headerAt(url) {
+  const part = async (from, to) => {
+    const res = await fetch(url, { headers: { Range: `bytes=${from}-${to}` } });
+    if (res.status !== 206)
+      throw new Error(`${url}: no range support (HTTP ${res.status})`);
+    return new Uint8Array(await res.arrayBuffer());
+  };
+  const n = Number(new DataView((await part(0, 7)).buffer).getBigUint64(0, true));
+  return JSON.parse(new TextDecoder().decode(await part(8, 8 + n - 1)));
+}
+var num = (n) => Number(n).toLocaleString("en-US");
+function facts(config, params) {
+  const cfg = config.cfg ?? {};
+  const f = {
+    step: num(config.step),
+    mb: Math.round((config.bytes ?? 0) / 1e6).toString(),
+    experts: num(cfg.pool_experts),
+    topk: num(cfg.pool_top_k),
+    passes: num(cfg.max_steps),
+    prelude: num(cfg.n_prelude),
+    context: num(cfg.block)
+  };
+  if (params)
+    Object.assign(f, { params: `${Math.round(params / 1e6)} million`, paramsM: `${Math.round(params / 1e6)}M` });
+  return f;
+}
+function fill(root, f) {
+  for (const el of root.querySelectorAll("[data-fill]")) {
+    const v = f[el.dataset.fill];
+    if (v !== undefined && !v.includes("NaN") && v !== "undefined")
+      el.textContent = v;
+  }
+}
+async function newestFacts() {
+  for (const [manifest, folder] of [[LATEST_MANIFEST, (m) => m.checkpoint ?? m.url ?? "."], [PUBLISHED_WEIGHTS + "config.json", () => "."]]) {
+    try {
+      const res = await fetch(manifest, { cache: "no-cache" });
+      if (!res.ok)
+        continue;
+      const config = await res.json();
+      if (!(Number.isInteger(config.step) && config.cfg))
+        continue;
+      const base = new URL(folder(config), manifest).href.replace(/\/?$/, "/");
+      let params = null;
+      try {
+        params = paramsOf(await headerAt(base + "model.safetensors"));
+      } catch {}
+      return facts(config, params);
+    } catch {}
+  }
+  return null;
+}
+
+// web/facts-page.js
+newestFacts().then((f) => f && fill(document, f));
+</script>
 </body>
 </html>
