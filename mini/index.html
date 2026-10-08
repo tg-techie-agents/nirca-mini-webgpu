@@ -200,7 +200,7 @@ SOFTWARE.
       <button id="chatsButton" type="button" aria-expanded="false" aria-controls="chats">Chats</button>
       <button id="newChat" type="button" disabled>New chat</button>
     </div>
-    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v23, built 2026-10-08 from 27f64d8">site v23</span></p>
+    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v24, built 2026-10-08 from 9fdf630">site v24</span></p>
     <nav aria-label="Pages">
       <a href="#chat" data-tab="chat" aria-current="page">Chat</a>
       <a href="#about" data-tab="about">About</a>
@@ -262,6 +262,19 @@ SOFTWARE.
     it makes mistakes, and it says odd things.</p>
   <p>The chat page runs the model on your own GPU with WebGPU. Nothing you type leaves the page. Its
     replies match Nirca's own reference code for the same model, step for step.</p>
+
+  <h2>Where it comes from</h2>
+  <p>Nirca was inspired by <a href="https://github.com/volotat/mini-AGI">mini-AGI</a>, an open project: a byte-level
+    language model that trains from scratch on one modest GPU and keeps learning from what it reads. Nirca began as
+    a port of mini-AGI to MLX, Apple's machine-learning framework, and adapts its fundamentals.</p>
+  <ul>
+    <li><strong>Kept:</strong> it reads and writes bytes, with no tokenizer; one block refines a hidden state pass
+      after pass (latent recurrence); every pass routes into one shared pool of experts; and a halting head decides
+      when to stop. Its first pretraining text was mini-AGI's corpus.</li>
+    <li><strong>Changed:</strong> the weights are ternary (−1, 0 or +1), trained that way from the first step; it
+      is tuned on chats, written in ChatML; and its pool is a fixed <span data-fill="experts">32</span> experts,
+      where mini-AGI grows and prunes its own.</li>
+  </ul>
 
   <h2>The model</h2>
   <div class="panel">
