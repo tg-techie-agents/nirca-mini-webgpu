@@ -200,7 +200,7 @@ SOFTWARE.
       <button id="chatsButton" type="button" aria-expanded="false" aria-controls="chats">Chats</button>
       <button id="newChat" type="button" disabled>New chat</button>
     </div>
-    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v28, built 2026-10-08 from f34caf0">site v28</span></p>
+    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v29, built 2026-10-08 from c46c4f9">site v29</span></p>
     <nav aria-label="Pages">
       <a href="#chat" data-tab="chat" aria-current="page">Chat</a>
       <a href="#about" data-tab="about">About</a>
@@ -1381,8 +1381,9 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
   let n = workgroupUniformLoad(&nW);
   if (t0 >= n) { return; }
   let m = min(8u, n - t0);
-  let o = wid.x * 64u + lid;               // of 2048
-  var a1 = array<f32, 8>(); var a3 = array<f32, 8>();
+  let oA = wid.x * 128u + lid; let oB = oA + 64u;          // of 2048
+  var a1A = array<f32, 8>(); var a3A = array<f32, 8>();
+  var a1B = array<f32, 8>(); var a3B = array<f32, 8>();
   for (var gi = 0u; gi < 4u; gi++) {
     for (var i = lid; i < 1024u; i += 64u) {
       let k = i / 128u;
@@ -1393,29 +1394,35 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
     workgroupBarrier();
     if (lid < 8u) { var t = 0.0; for (var k = 0u; k < 128u; k++) { t += xs[lid * 128u + k]; } xsum[lid] = t; }
     workgroupBarrier();
-    var p1 = array<f32, 8>(); var p3 = array<f32, 8>();
-    let wbase = (e * 2048u + o) * 32u + gi * 8u;
+    var p1A = array<f32, 8>(); var p3A = array<f32, 8>();
+    var p1B = array<f32, 8>(); var p3B = array<f32, 8>();
+    let wA = (e * 2048u + oA) * 32u + gi * 8u; let wB = (e * 2048u + oB) * 32u + gi * 8u;
     for (var w = 0u; w < 8u; w++) {
-      let w1 = c1[wbase + w]; let w3 = c3[wbase + w];
+      let w1A = c1[wA + w]; let w3A = c3[wA + w]; let w1B = c1[wB + w]; let w3B = c3[wB + w];
       for (var c = 0u; c < 16u; c++) {
-        let q1 = f32((w1 >> (2u * c)) & 3u); let q3 = f32((w3 >> (2u * c)) & 3u);
+        let sh = 2u * c;
+        let q1A = f32((w1A >> sh) & 3u); let q3A = f32((w3A >> sh) & 3u);
+        let q1B = f32((w1B >> sh) & 3u); let q3B = f32((w3B >> sh) & 3u);
         for (var k = 0u; k < 8u; k++) {
           let xv = xs[k * 128u + w * 16u + c];
-          p1[k] += q1 * xv;
-          p3[k] += q3 * xv;
+          p1A[k] += q1A * xv; p3A[k] += q3A * xv;
+          p1B[k] += q1B * xv; p3B[k] += q3B * xv;
         }
       }
     }
-    let gs = (e * 2048u + o) * 4u + gi;
+    let gA = (e * 2048u + oA) * 4u + gi; let gB = (e * 2048u + oB) * 4u + gi;
     for (var k = 0u; k < 8u; k++) {
-      a1[k] += s1[gs] * p1[k] - s1[gs] * xsum[k];
-      a3[k] += s3[gs] * p3[k] - s3[gs] * xsum[k];
+      a1A[k] += s1[gA] * p1A[k] - s1[gA] * xsum[k];
+      a3A[k] += s3[gA] * p3A[k] - s3[gA] * xsum[k];
+      a1B[k] += s1[gB] * p1B[k] - s1[gB] * xsum[k];
+      a3B[k] += s3[gB] * p3B[k] - s3[gB] * xsum[k];
     }
     workgroupBarrier();
   }
   for (var k = 0u; k < m; k++) {
     let p = grp[32u + e * 512u + t0 + k];
-    eh[p * 2048u + o] = (a1[k] / (1.0 + exp(-a1[k]))) * a3[k];
+    eh[p * 2048u + oA] = (a1A[k] / (1.0 + exp(-a1A[k]))) * a3A[k];
+    eh[p * 2048u + oB] = (a1B[k] / (1.0 + exp(-a1B[k]))) * a3B[k];
   }
 }`;
 var EXPERT2G = HEADER + `
@@ -1438,8 +1445,8 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
   let n = workgroupUniformLoad(&nW);
   if (t0 >= n) { return; }
   let m = min(8u, n - t0);
-  let o = wid.x * 64u + lid;               // of 512
-  var acc = array<f32, 8>();
+  let o0 = wid.x * 256u + lid;             // and o0 + 64, + 128, + 192, of 512
+  var acc = array<array<f32, 8>, 4>();
   for (var gi = 0u; gi < 16u; gi++) {
     for (var i = lid; i < 1024u; i += 64u) {
       let k = i / 128u;
@@ -1450,23 +1457,31 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
     workgroupBarrier();
     if (lid < 8u) { var t = 0.0; for (var q = 0u; q < 128u; q++) { t += xs[lid * 128u + q]; } xsum[lid] = t; }
     workgroupBarrier();
-    var part = array<f32, 8>();
-    let wbase = (e * 512u + o) * 128u + gi * 8u;
+    var part = array<array<f32, 8>, 4>();
     for (var w = 0u; w < 8u; w++) {
-      let word = c2[wbase + w];
+      var word = array<u32, 4>();
+      for (var j = 0u; j < 4u; j++) { word[j] = c2[(e * 512u + o0 + 64u * j) * 128u + gi * 8u + w]; }
       for (var c = 0u; c < 16u; c++) {
-        let q = f32((word >> (2u * c)) & 3u);
-        for (var k = 0u; k < 8u; k++) { part[k] += q * xs[k * 128u + w * 16u + c]; }
+        let sh = 2u * c;
+        var q = array<f32, 4>();
+        for (var j = 0u; j < 4u; j++) { q[j] = f32((word[j] >> sh) & 3u); }
+        for (var k = 0u; k < 8u; k++) {
+          let xv = xs[k * 128u + w * 16u + c];
+          for (var j = 0u; j < 4u; j++) { part[j][k] += q[j] * xv; }
+        }
       }
     }
-    let sc = s2[(e * 512u + o) * 16u + gi];
-    for (var k = 0u; k < 8u; k++) { acc[k] += sc * part[k] - sc * xsum[k]; }
+    for (var j = 0u; j < 4u; j++) {
+      let sc = s2[(e * 512u + o0 + 64u * j) * 16u + gi];
+      for (var k = 0u; k < 8u; k++) { acc[j][k] += sc * part[j][k] - sc * xsum[k]; }
+    }
     workgroupBarrier();
   }
   for (var k = 0u; k < m; k++) {
     let p = grp[32u + e * 512u + t0 + k];
-    let r = p / 32u; let j = p % 32u;
-    ep[p * 512u + o] = acc[k] * bitcast<f32>(route[r * 96u + 32u + j]);
+    let r = p / 32u; let jj = p % 32u;
+    let wt = bitcast<f32>(route[r * 96u + 32u + jj]);
+    for (var j = 0u; j < 4u; j++) { ep[p * 512u + o0 + 64u * j] = acc[j][k] * wt; }
   }
 }`;
 var TRACE = HEADER + `
@@ -1803,8 +1818,8 @@ class Engine {
       ] : [
         this.#op(GCLEAR, [b.grp], () => [1]),
         this.#op(GROUP, [g, s, b.route, b.st, b.grp], (rows) => [Math.ceil(rows * 32 / 64)]),
-        this.#op(EXPERT13G, [g, b.a, pool.w1.codes, pool.w1.scales, pool.w3.codes, pool.w3.scales, b.grp, b.eh], (rows) => [2048 / 64, 32, Math.ceil(rows / 8)]),
-        this.#op(EXPERT2G, [g, b.eh, pool.w2.codes, pool.w2.scales, b.route, b.grp, b.ep], (rows) => [D / 64, 32, Math.ceil(rows / 8)])
+        this.#op(EXPERT13G, [g, b.a, pool.w1.codes, pool.w1.scales, pool.w3.codes, pool.w3.scales, b.grp, b.eh], (rows) => [2048 / 128, 32, Math.ceil(rows / 8)]),
+        this.#op(EXPERT2G, [g, b.eh, pool.w2.codes, pool.w2.scales, b.route, b.grp, b.ep], (rows) => [D / 256, 32, Math.ceil(rows / 8)])
       ], this.#op(EXPERT_SUM, [g, s, b.ep, b.route, b.x1, b.h, b.st], (rows) => [D / 64, rows]), this.#op(EXIT, [g, s, b.h, w.lnf, w.halt, b.yf, b.st], (rows) => [rows]), qmm(b.yf, w.emb, b.logits, D, 265, { gate: ST.NEWLY + n, rows1: 1 }));
     }
     return ops;
