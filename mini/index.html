@@ -97,6 +97,7 @@ SOFTWARE.
   nav { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-top: 10px; overflow-x: auto; }
   nav a { padding: 8px 12px; text-decoration: none; color: var(--muted); border-bottom: 2px solid transparent;
     white-space: nowrap; font-size: 15px; }
+  nav .ver { margin-left: auto; align-self: center; padding: 0 4px; color: var(--muted); }
   nav a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--accent); }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
   button { border: 1px solid var(--line); background: var(--panel); color: var(--ink);
@@ -137,6 +138,8 @@ SOFTWARE.
   #composer { flex: none; }
   .foot { flex: none; margin: -4px 0 0; text-align: center; font-size: 12px; color: var(--muted); }
   html.typing .foot { display: none; }
+  /* with the keyboard up the message box and Send always have the room: the saved-chats list and an open Settings fold away */
+  html.typing #chats, html.typing details#settings[open] .settings { display: none; }
   /* with the keyboard up the space is the conversation's: the intro line and a loaded model's panel step aside */
   html.typing header p, html.typing.loaded #loader { display: none; }
   form { display: flex; gap: 8px; align-items: flex-end; }
@@ -205,21 +208,22 @@ SOFTWARE.
   <header>
     <div class="titlebar">
       <h1>Nirca Mini, in your browser</h1>
-      <button id="chatsButton" type="button" aria-expanded="false" aria-controls="chats">Chats</button>
+      <button id="chatsButton" type="button" aria-expanded="false" aria-controls="chats">History</button>
       <button id="newChat" type="button" disabled>New chat</button>
     </div>
-    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v36, built 2026-10-08 from b07d0c9">site v36</span></p>
+    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU.</p>
     <nav aria-label="Pages">
       <a href="#chat" data-tab="chat" aria-current="page">Chat</a>
       <a href="#about" data-tab="about">About</a>
       <a href="#charter" data-tab="charter">Charter</a>
       <a href="slides.html" id="slidesLink" target="_blank" rel="noopener">Slides ↗</a>
+      <span class="ver" data-fill="site" title="site v38, built 2026-10-08 from 9313553">site v38</span>
     </nav>
   </header>
 
   <main id="chatTab">
     <section class="panel" id="chats" hidden aria-label="Saved chats">
-      <h2 class="listHead">Earlier chats</h2>
+      <h2 class="listHead">History</h2>
       <ul id="chatList"></ul>
       <p class="hint" id="chatsNone">No saved chats yet. A chat is kept in this browser once it has a reply.</p>
     </section>
@@ -311,12 +315,12 @@ SOFTWARE.
 
   <h2>How it came to be</h2>
   <p>On 2026-10-07, Nirca Mini began as a cut-down copy of nirca-0, a larger Nirca model, and has
-    trained since on short chats. The copy on this page is step <span data-fill="step">68,618</span>; the page
+    trained since on short chats. The copy on this page is step <span data-fill="step">68,718</span>; the page
     loads newer checkpoints as they are published.</p>
 
   <h2>How it is trained</h2>
-  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">68,618</span>, so for
-    <span data-fill="ternaryShare">98%</span> of its <span data-fill="tokens">1,743,512,122</span> tokens</p>
+  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">68,718</span>, so for
+    <span data-fill="ternaryShare">98%</span> of its <span data-fill="tokens">1,752,729,629</span> tokens</p>
   <div class="diagram"><svg viewBox="0 0 720 300" role="img" aria-labelledby="dtitle">
     <title id="dtitle">Training: open chat datasets and synthetic and private chats are prepared (anonymised,
       put in ChatML, cut to fit, swept for leaks) for the trainer, which writes checkpoints; checkpoints are
@@ -2827,7 +2831,6 @@ function showChat(id) {
     bubble(x.role === "user" ? "user" : "bot", x.role === "user" ? x.content.trim() : x.content, x.meta ?? "");
   saveChat(false);
   setChatEnabled(!!engine);
-  toggleChats(!$("chats").hidden || !messages.length && Object.keys(chats).length > 0);
   toEnd();
 }
 function toggleChats(on = $("chats").hidden) {
