@@ -22,6 +22,8 @@
   h2 { font-size: 17px; margin: 32px 0 8px; }
   p, li { max-width: 68ch; }
   a { color: var(--accent); }
+  .headline { list-style: none; padding: 12px 14px; margin: 12px 0 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel, transparent); }
+  .headline li + li { margin-top: 8px; }
   .lede { color: var(--muted); margin-top: 4px; }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
   dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0; }
@@ -52,6 +54,13 @@
   <p class="lede">A small chat model, trained from scratch on a Mac, that runs in your browser.</p>
 
   <!--ABOUT-->
+  <ul class="headline">
+    <li><strong>Trained from scratch, ternary.</strong> Each weight in its linear layers takes one of three values: minus one, zero or plus one. It
+      was trained with quantization-aware training from step 14,655 on, so the weights were learned
+      ternary rather than squeezed down after training.</li>
+    <li><strong>Small.</strong> About <span data-fill="params">109 million</span> parameters,
+      <span data-fill="mb">33</span> MB to download, small enough to run on a phone's GPU.</li>
+  </ul>
   <h2>What it is</h2>
   <p>Nirca is a project that trains small language models from scratch on a Mac, to find out how far
     careful training can take a small model. Nirca Mini is its smallest chat model, made to be a friendly

@@ -161,6 +161,9 @@ SOFTWARE.
   #chatList li[aria-current="true"] .open { background: var(--soft); }
   #chatList .del { border: 0; background: none; color: var(--muted); padding: 0 12px; font-size: 18px; }
   #chats .hint { padding: 8px; }
+  .headline { list-style: none; padding: 12px 14px; margin: 12px 0 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel, transparent); }
+  .headline li + li { margin-top: 8px; }
+  #chats .listHead { margin: 0; padding: 6px 8px 2px; font-size: 13px; font-weight: 600; color: var(--muted); }
 
   /* the reading tabs */
   .read { padding: 8px 0 40px; line-height: 1.6; }
@@ -200,7 +203,7 @@ SOFTWARE.
       <button id="chatsButton" type="button" aria-expanded="false" aria-controls="chats">Chats</button>
       <button id="newChat" type="button" disabled>New chat</button>
     </div>
-    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v29, built 2026-10-08 from c46c4f9">site v29</span></p>
+    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v31, built 2026-10-08 from da8d921">site v31</span></p>
     <nav aria-label="Pages">
       <a href="#chat" data-tab="chat" aria-current="page">Chat</a>
       <a href="#about" data-tab="about">About</a>
@@ -211,6 +214,7 @@ SOFTWARE.
 
   <main id="chatTab">
     <section class="panel" id="chats" hidden aria-label="Saved chats">
+      <h2 class="listHead">Earlier chats</h2>
       <ul id="chatList"></ul>
       <p class="hint" id="chatsNone">No saved chats yet. A chat is kept in this browser once it has a reply.</p>
     </section>
@@ -255,6 +259,13 @@ SOFTWARE.
   </main>
 
   <main id="aboutTab" class="read" hidden>
+  <ul class="headline">
+    <li><strong>Trained from scratch, ternary.</strong> Each weight in its linear layers takes one of three values: minus one, zero or plus one. It
+      was trained with quantization-aware training from step 14,655 on, so the weights were learned
+      ternary rather than squeezed down after training.</li>
+    <li><strong>Small.</strong> About <span data-fill="params">109 million</span> parameters,
+      <span data-fill="mb">33</span> MB to download, small enough to run on a phone's GPU.</li>
+  </ul>
   <h2>What it is</h2>
   <p>Nirca is a project that trains small language models from scratch on a Mac, to find out how far
     careful training can take a small model. Nirca Mini is its smallest chat model, made to be a friendly
@@ -651,6 +662,8 @@ __export(exports_kernels, {
   EXIT: () => EXIT,
   EMBED: () => EMBED,
   CAPACITY: () => CAPACITY,
+  ATTN1P: () => ATTN1P,
+  ATTN1M: () => ATTN1M,
   ATTN: () => ATTN,
   ADMIT: () => ADMIT,
   ADAPTER1: () => ADAPTER1,
@@ -828,10 +841,14 @@ var RMSNORM = HEADER + `
 @group(0) @binding(1) var<storage, read> x: array<f32>;
 @group(0) @binding(2) var<storage, read> w: array<f32>;
 @group(0) @binding(3) var<storage, read_write> y: array<f32>;
+@group(0) @binding(4) var<uniform> s: S;
+@group(0) @binding(5) var<storage, read> st: array<u32>;
+${GATE}
 var<workgroup> red: array<f32, 64>;
 @compute @workgroup_size(64)
 fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid3: vec3<u32>) {
   let lid = lid3.x;
+  if (gateClosed(lid)) { return; }
   let r = wid.x;
   if (r >= g.rows) { return; }
   var t = 0.0;
@@ -927,10 +944,14 @@ var ADAPTER = HEADER + `
 @group(0) @binding(2) var<storage, read> x: array<f32>;
 @group(0) @binding(3) var<storage, read> w: array<f32>;
 @group(0) @binding(4) var<storage, read_write> u: array<f32>;
+@group(0) @binding(5) var<uniform> s: S;
+@group(0) @binding(6) var<storage, read> st: array<u32>;
+${GATE}
 var<workgroup> xs: array<f32, 1024>;
 @compute @workgroup_size(64)
 fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid3: vec3<u32>) {
   let lid = lid3.x;
+  if (gateClosed(lid)) { return; }
   let r0 = wid.y * 8u;
   if (r0 >= g.rows) { return; }
   let o = wid.x * 64u + lid;
@@ -1320,11 +1341,15 @@ var ADAPTER1 = HEADER + `
 @group(0) @binding(2) var<storage, read> x: array<f32>;
 @group(0) @binding(3) var<storage, read> w: array<vec4<f32>>;
 @group(0) @binding(4) var<storage, read_write> u: array<f32>;
+@group(0) @binding(5) var<uniform> s: S;
+@group(0) @binding(6) var<storage, read> st: array<u32>;
+${GATE}
 var<workgroup> xs: array<vec4<f32>, 256>;
 var<workgroup> red: array<f32, 64>;
 @compute @workgroup_size(64)
 fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid3: vec3<u32>) {
   let lid = lid3.x;
+  if (gateClosed(lid)) { return; }
   _ = g.rows;
   for (var i = lid; i < 256u; i += 64u) {
     let k = i * 4u;
@@ -1483,6 +1508,88 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
     let wt = bitcast<f32>(route[r * 96u + 32u + jj]);
     for (var j = 0u; j < 4u; j++) { ep[p * 512u + o0 + 64u * j] = acc[j][k] * wt; }
   }
+}`;
+var ATTN1P = HEADER + `
+@group(0) @binding(0) var<uniform> g: G;
+@group(0) @binding(1) var<uniform> s: S;
+@group(0) @binding(2) var<storage, read> qkv: array<f32>;
+@group(0) @binding(3) var<storage, read> kc: array<f32>;
+@group(0) @binding(4) var<storage, read> vc: array<f32>;
+@group(0) @binding(5) var<storage, read_write> part: array<f32>;
+@group(0) @binding(6) var<storage, read> st: array<u32>;
+var<workgroup> gateOpen: u32;
+var<workgroup> qs: array<f32, 64>;
+var<workgroup> red: array<f32, 64>;
+var<workgroup> ps: array<f32, 64>;
+@compute @workgroup_size(64)
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid3: vec3<u32>) {
+  let t = lid3.x;
+  let c = wid.x; let hh = wid.y;
+  let n = g.offset + 1u; let j0 = c * 64u;
+  if (t == 0u) {
+    var open = select(1u, st[s.gate], s.gate != NONE);
+    if (j0 >= n || (s.gate != NONE && st[HALTED] != 0u)) { open = 0u; }
+    gateOpen = open;
+  }
+  if (workgroupUniformLoad(&gateOpen) == 0u) { return; }
+  qs[t] = qkv[hh * 64u + t] * 0.125;
+  workgroupBarrier();
+  let j = j0 + t; let valid = j < n;
+  var sc = -3.0e38;
+  if (valid) {
+    sc = 0.0;
+    let kb = j * D + hh * 64u;
+    for (var d = 0u; d < 64u; d++) { sc += qs[d] * kc[kb + d]; }
+  }
+  red[t] = sc;
+  workgroupBarrier();
+  for (var k = 32u; k > 0u; k >>= 1u) {
+    if (t < k) { red[t] = max(red[t], red[t + k]); }
+    workgroupBarrier();
+  }
+  let m = red[0];
+  workgroupBarrier();
+  let pv = select(0.0, exp(sc - m), valid);
+  ps[t] = pv; red[t] = pv;
+  workgroupBarrier();
+  for (var k = 32u; k > 0u; k >>= 1u) {
+    if (t < k) { red[t] += red[t + k]; }
+    workgroupBarrier();
+  }
+  let cnt = min(64u, n - j0);
+  var acc = 0.0;
+  for (var u = 0u; u < cnt; u++) { acc += ps[u] * vc[(j0 + u) * D + hh * 64u + t]; }
+  let o = (hh * 32u + c) * 66u;
+  if (t == 0u) { part[o] = m; part[o + 1u] = red[0]; }
+  part[o + 2u + t] = acc;
+}`;
+var ATTN1M = HEADER + `
+@group(0) @binding(0) var<uniform> g: G;
+@group(0) @binding(1) var<uniform> s: S;
+@group(0) @binding(2) var<storage, read> part: array<f32>;
+@group(0) @binding(3) var<storage, read_write> att: array<f32>;
+@group(0) @binding(4) var<storage, read> st: array<u32>;
+var<workgroup> gateOpen: u32;
+@compute @workgroup_size(64)
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid3: vec3<u32>) {
+  let t = lid3.x; let hh = wid.x;
+  if (t == 0u) {
+    var open = select(1u, st[s.gate], s.gate != NONE);
+    if (s.gate != NONE && st[HALTED] != 0u) { open = 0u; }
+    gateOpen = open;
+  }
+  if (workgroupUniformLoad(&gateOpen) == 0u) { return; }
+  let chunks = (g.offset + 1u + 63u) / 64u;
+  var mx = -3.0e38;
+  for (var c = 0u; c < chunks; c++) { mx = max(mx, part[(hh * 32u + c) * 66u]); }
+  var den = 0.0; var num = 0.0;
+  for (var c = 0u; c < chunks; c++) {
+    let o = (hh * 32u + c) * 66u;
+    let f = exp(part[o] - mx);
+    den += part[o + 1u] * f;
+    num += part[o + 2u + t] * f;
+  }
+  att[hh * 64u + t] = num / den;
 }`;
 var TRACE = HEADER + `
 @group(0) @binding(0) var<storage, read> hist: array<u32>;
@@ -1688,6 +1795,7 @@ class Engine {
       eh: buf(R * 32 * 2048 * 4),
       ep: buf(R * 32 * D * 4),
       grp: buf((32 + 32 * R) * 4),
+      part: buf(HEADS * 32 * 66 * 4),
       st: buf(ST.WORDS * 4),
       yf: buf(D * 4),
       logits: buf(272 * 4),
@@ -1770,9 +1878,12 @@ class Engine {
       b.st,
       base ? has1 : has0
     ], (rows) => [Math.ceil(outDim / 64), Math.ceil(rows / 8)]);
-    const norm = (x, wt, y) => this.#op(RMSNORM, [g, x, wt, y], (rows) => [rows]);
+    const norm = (x, wt, y, gate = NONE) => this.#op(RMSNORM, [g, x, wt, y, this.#s({ gate }), b.st], (rows) => [rows]);
     const ropeKv = (slot) => this.#op(ROPE_KV, [g, b.qkv, b.rope, this.kv[slot].k, this.kv[slot].v], (rows) => [Math.ceil(rows * 256 / 256)]);
-    const attn = (slot, gate) => this.#op(ATTN, [
+    const attn = (slot, gate) => one ? [
+      this.#op(ATTN1P, [g, this.#s({ gate }), b.qkv, this.kv[slot].k, this.kv[slot].v, b.part, b.st], () => [Math.ceil(this.block / 64), HEADS]),
+      this.#op(ATTN1M, [g, this.#s({ gate }), b.part, b.att, b.st], () => [HEADS])
+    ] : [this.#op(ATTN, [
       g,
       this.#s({ gate }),
       b.qkv,
@@ -1780,11 +1891,11 @@ class Engine {
       this.kv[slot].v,
       b.att,
       b.st
-    ], (rows) => [rows, HEADS]);
+    ], (rows) => [rows, HEADS])];
     const ops = [];
     ops.push(this.#op(EMBED, [g, b.ids, w.emb.codes, w.emb.scales, b.x], (rows) => [Math.ceil(rows * D / 256)]));
     w.pre.forEach((p, i) => {
-      ops.push(norm(b.x, p.ln1, b.a), qmm(b.a, p.qkv, b.qkv, D, QKV), ropeKv(i), attn(i, NONE), qmm(b.att, p.proj, b.x1, D, D, { base: b.x }), norm(b.x1, p.ln2, b.a), this.#op(QMM2, [
+      ops.push(norm(b.x, p.ln1, b.a), qmm(b.a, p.qkv, b.qkv, D, QKV), ropeKv(i), ...attn(i, NONE), qmm(b.att, p.proj, b.x1, D, D, { base: b.x }), norm(b.x1, p.ln2, b.a), this.#op(QMM2, [
         g,
         this.#s({ inDim: D, outDim: 1408 }),
         b.a,
@@ -1801,7 +1912,8 @@ class Engine {
       const slot = SLOTS_PRE + n;
       const gate = ST.COUNT + n;
       const s = this.#s({ gate, pass: n, first: n === 0 ? 1 : 0, last: n === this.maxSteps - 1 ? 1 : 0 });
-      ops.push(one ? this.#op(ADAPTER1, [g, b.h, b.x, w.adapter, b.u], () => [D / 8]) : this.#op(ADAPTER, [g, b.h, b.x, w.adapter, b.u], (rows) => [D / 64, Math.ceil(rows / 8)]), norm(b.u, r.ln1, b.a), qmm(b.a, r.qkv, b.qkv, D, QKV), ropeKv(slot), attn(slot, gate), qmm(b.att, r.proj, b.x1, D, D, { base: b.u, gate }), norm(b.x1, r.ln2, b.a), this.#op(ROUTER, [g, s, b.a, r.depth, r.router, b.rl, b.st], (rows) => [rows]), this.#op(ADMIT, [s, b.st, g], () => [1]), this.#op(ROUTE, [g, s, b.rl, pool.gate, b.route, b.st], (rows) => [Math.ceil(rows / 64)]), this.#op(CAPACITY, [g, s, b.route, b.st], () => [1]), ...one ? [
+      const fresh = this.#s({ gate: n >= 2 ? ST.COUNT + n - 1 : NONE });
+      ops.push(one ? this.#op(ADAPTER1, [g, b.h, b.x, w.adapter, b.u, fresh, b.st], () => [D / 8]) : this.#op(ADAPTER, [g, b.h, b.x, w.adapter, b.u, fresh, b.st], (rows) => [D / 64, Math.ceil(rows / 8)]), norm(b.u, r.ln1, b.a, n >= 2 ? ST.COUNT + n - 1 : NONE), qmm(b.a, r.qkv, b.qkv, D, QKV, { gate: n >= 2 ? ST.COUNT + n - 1 : NONE }), ropeKv(slot), ...attn(slot, gate), qmm(b.att, r.proj, b.x1, D, D, { base: b.u, gate }), norm(b.x1, r.ln2, b.a, gate), this.#op(ROUTER, [g, s, b.a, r.depth, r.router, b.rl, b.st], (rows) => [rows]), this.#op(ADMIT, [s, b.st, g], () => [1]), this.#op(ROUTE, [g, s, b.rl, pool.gate, b.route, b.st], (rows) => [Math.ceil(rows / 64)]), this.#op(CAPACITY, [g, s, b.route, b.st], () => [1]), ...one ? [
         this.#op(EXPERT13, [
           g,
           s,
@@ -2525,6 +2637,8 @@ function setChatEnabled(on) {
 }
 function bubble(role, text, meta = "") {
   $("empty").hidden = true;
+  if (role === "user")
+    toggleChats(false);
   const el = document.createElement("div");
   el.className = `msg ${role}`;
   const t = document.createElement("span");
@@ -2631,6 +2745,7 @@ function showChat(id) {
     bubble(x.role === "user" ? "user" : "bot", x.role === "user" ? x.content.trim() : x.content, x.meta ?? "");
   saveChat(false);
   setChatEnabled(!!engine);
+  toggleChats(!$("chats").hidden || !messages.length && Object.keys(chats).length > 0);
   toEnd();
 }
 function toggleChats(on = $("chats").hidden) {
@@ -2763,7 +2878,6 @@ for (const id of Object.keys(DEFAULTS))
   $(id).addEventListener("change", saveSettings);
 $("newChat").addEventListener("click", () => {
   showChat(null);
-  toggleChats(false);
   $("input").focus();
 });
 $("chatsButton").addEventListener("click", () => toggleChats());
