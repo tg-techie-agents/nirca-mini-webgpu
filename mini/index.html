@@ -145,6 +145,7 @@ SOFTWARE.
   details#settings summary { color: var(--muted); font-size: 13px; cursor: pointer; }
   .settings { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-top: 8px; }
   label.small { color: var(--muted); font-size: 13px; display: flex; gap: 6px; align-items: center; }
+  label.small select { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; min-width: 0; max-width: 100%; }
   label.small input { width: 64px; color: var(--ink); background: var(--panel);
     border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
   .hint { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 12px; }
@@ -205,7 +206,7 @@ SOFTWARE.
       <button id="chatsButton" type="button" aria-expanded="false" aria-controls="chats">Chats</button>
       <button id="newChat" type="button" disabled>New chat</button>
     </div>
-    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v33, built 2026-10-08 from 1b9bf5a">site v33</span></p>
+    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v34, built 2026-10-08 from 8b1cd80">site v34</span></p>
     <nav aria-label="Pages">
       <a href="#chat" data-tab="chat" aria-current="page">Chat</a>
       <a href="#about" data-tab="about">About</a>
@@ -227,6 +228,7 @@ SOFTWARE.
       </div>
       <div class="bar" id="bar" hidden><div></div></div>
       <div class="status" id="loadStatus"></div>
+      <label class="small" id="modelRow">Model <select id="model" disabled></select></label>
     </section>
 
     <section id="chat" aria-live="polite">
@@ -307,12 +309,12 @@ SOFTWARE.
 
   <h2>How it came to be</h2>
   <p>On 2026-10-07, Nirca Mini began as a cut-down copy of nirca-0, a larger Nirca model, and has
-    trained since on short chats. The copy on this page is step <span data-fill="step">62,895</span>; the page
+    trained since on short chats. The copy on this page is step <span data-fill="step">68,155</span>; the page
     loads newer checkpoints as they are published.</p>
 
   <h2>How it is trained</h2>
-  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">62,895</span>, so for
-    <span data-fill="ternaryShare">98%</span> of its <span data-fill="tokens">1,217,308,397</span> tokens</p>
+  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">68,155</span>, so for
+    <span data-fill="ternaryShare">98%</span> of its <span data-fill="tokens">1,701,013,761</span> tokens</p>
   <div class="diagram"><svg viewBox="0 0 720 300" role="img" aria-labelledby="dtitle">
     <title id="dtitle">Training: open chat datasets and synthetic and private chats are prepared (anonymised,
       put in ChatML, cut to fit, swept for leaks) for the trainer, which writes checkpoints; checkpoints are
@@ -2367,6 +2369,15 @@ function fill(root, f) {
 var params = new URLSearchParams(location.search);
 var slash = (u) => u.endsWith("/") ? u : u + "/";
 var latestUrl = () => new URL(params.get("latest") ?? LATEST_MANIFEST, location.href).href;
+var PINNED = { "62895": "checkpoints/1217308k/", original: "checkpoints/1168355k/" };
+var choice = Object.hasOwn(PINNED, params.get("model")) ? params.get("model") : "latest";
+async function readPinned(key) {
+  const base = slash(new URL(PINNED[key], LATEST_MANIFEST).href);
+  const res = await fetch(`${base}config.json`, { cache: "no-cache" });
+  if (!res.ok)
+    throw new Error(`${base}config.json: HTTP ${res.status}`);
+  return [base, { ...await res.json(), checkpoint: PINNED[key] }];
+}
 function weightCandidates() {
   const given = params.get("weights");
   if (given)
@@ -2526,6 +2537,44 @@ function showFacts(config, buffer) {
     $("most").max = cfg.max_steps;
   }
 }
+var MODEL_LABELS = { latest: "Latest, follows the published model", "62895": "Fixed model", original: "Original published model" };
+function showModels() {
+  const sel = $("model");
+  if (!sel.options.length) {
+    for (const [key, text] of Object.entries(MODEL_LABELS))
+      sel.add(new Option(text, key));
+    for (const key of Object.keys(PINNED))
+      readPinned(key).then(([, c]) => {
+        sel.querySelector(`option[value="${key}"]`).textContent = `${MODEL_LABELS[key]} (step ${Number(c.step).toLocaleString("en-US")})`;
+      }).catch(() => {});
+  }
+  sel.value = choice;
+}
+async function chooseModel() {
+  const picked = $("model").value;
+  if (busy || picked === choice) {
+    $("model").value = choice;
+    return;
+  }
+  const was = choice;
+  choice = picked;
+  try {
+    const next = picked === "latest" ? await readLatest().then((m) => ({ base: latestBase(m), config: m })) : await readPinned(picked).then(([base, config]) => ({ base, config }));
+    const url = new URL(location.href);
+    if (picked === "latest")
+      url.searchParams.delete("model");
+    else
+      url.searchParams.set("model", picked);
+    history.replaceState(null, "", url);
+    if (!sameModel(next.config, current.config))
+      await follow(next, true);
+  } catch (e) {
+    choice = was;
+    $("model").value = was;
+    setLoad(`Couldn't switch the model (${e.message ?? e}); still on step ${current.config.step}.`, null, true);
+  }
+}
+$("model").addEventListener("change", chooseModel);
 var progress = (verb) => (got, total) => setLoad(total ? `${verb}: ${mb(got)} of ${mb(total)} MB` : `${verb}: ${mb(got)} MB`, total ? got / total * 0.9 : null);
 async function load() {
   $("load").hidden = true;
@@ -2536,12 +2585,19 @@ async function load() {
     const explicit = params.has("weights");
     let found = null;
     if (!explicit) {
-      try {
-        const m = await readLatest();
-        found = [latestBase(m), m];
-      } catch (e) {
-        console.warn("no published manifest:", e);
-      }
+      if (choice !== "latest") {
+        try {
+          found = await readPinned(choice);
+        } catch (e) {
+          console.warn("no such model:", e);
+        }
+      } else
+        try {
+          const m = await readLatest();
+          found = [latestBase(m), m];
+        } catch (e) {
+          console.warn("no published manifest:", e);
+        }
       const rec = found ? null : await cachedModel();
       if (rec)
         found = [rec.base, rec.config];
@@ -2563,6 +2619,7 @@ async function load() {
     $("input").focus();
     if (!explicit)
       watchLatest();
+    showModels();
   } catch (e) {
     console.error(e);
     $("loadText").textContent = "The model didn't load.";
@@ -2586,7 +2643,7 @@ function watchLatest() {
   });
 }
 async function checkLatest() {
-  if (following || !current)
+  if (following || !current || choice !== "latest")
     return;
   try {
     const config = await readLatest();
@@ -2601,12 +2658,12 @@ async function checkLatest() {
     console.warn("could not check the published model:", e);
   }
 }
-async function follow(next) {
+async function follow(next, picked = false) {
   following = true;
   busy = true;
   setChatEnabled(false);
   const was = current.config.step, to = next.config.step;
-  $("loadText").textContent = `Switching to step ${to}, the published model…`;
+  $("loadText").textContent = `Switching to step ${to}${picked ? "" : ", the published model"}…`;
   try {
     const { buffer } = await fetchWeights(next.base, next.config, progress(`Downloading step ${to}`));
     setLoad("Loading onto the GPU…", 0.95);
@@ -2615,14 +2672,16 @@ async function follow(next) {
     old?.destroy();
     current = next;
     $("loadText").textContent = "Model loaded.";
-    const news = to > was ? `Now on step ${to}, the newest published model.` : `Step ${was} is no longer the published model; now on step ${to}.`;
+    const news = picked ? `Now on step ${to}.` : to > was ? `Now on step ${to}, the newest published model.` : `Step ${was} is no longer the published model; now on step ${to}.`;
     setLoad(`${news} Your chat continues with it.`, 1);
-    $("toastText").textContent = news;
-    $("toast").hidden = false;
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => {
-      $("toast").hidden = true;
-    }, 8000);
+    if (!picked) {
+      $("toastText").textContent = news;
+      $("toast").hidden = false;
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        $("toast").hidden = true;
+      }, 8000);
+    }
   } catch (e) {
     console.error(e);
     $("loadText").textContent = "Model loaded.";
@@ -2645,6 +2704,7 @@ function setChatEnabled(on) {
   $("input").disabled = !on || busy;
   $("send").disabled = !on || busy;
   $("newChat").disabled = !on || busy || !messages.length;
+  $("model").disabled = !on || busy;
   for (const b of $("chatList").querySelectorAll("button"))
     b.disabled = busy;
 }
