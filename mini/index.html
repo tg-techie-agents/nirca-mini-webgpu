@@ -200,7 +200,7 @@ SOFTWARE.
       <button id="chatsButton" type="button" aria-expanded="false" aria-controls="chats">Chats</button>
       <button id="newChat" type="button" disabled>New chat</button>
     </div>
-    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v25, built 2026-10-08 from 3760126">site v25</span></p>
+    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v27, built 2026-10-08 from e3e6942">site v27</span></p>
     <nav aria-label="Pages">
       <a href="#chat" data-tab="chat" aria-current="page">Chat</a>
       <a href="#about" data-tab="about">About</a>
@@ -264,19 +264,14 @@ SOFTWARE.
     replies match Nirca's own reference code for the same model, step for step.</p>
 
   <h2>Where it comes from</h2>
-  <p>Nirca's architecture is deliberately derived from <a href="https://github.com/volotat/mini-AGI">mini-AGI</a>, an
-    open project that inspired it: a byte-level language model that trains from scratch on one modest GPU and keeps
-    learning from what it reads. Nirca began as a port of mini-AGI to MLX, Apple's machine-learning framework, and
-    adapts its fundamentals.</p>
+  <p>Nirca was inspired by <a href="https://github.com/volotat/mini-AGI">mini-AGI</a>, and its architecture is
+    deliberately derived from it: Nirca began as a port of mini-AGI to MLX.</p>
   <ul>
-    <li><strong>Kept:</strong> it reads and writes bytes, with no tokenizer; one block refines a hidden state pass
-      after pass (latent recurrence); every pass routes into one shared pool of experts; and a halting head decides
-      when to stop. Its first pretraining text was mini-AGI's corpus.</li>
-    <li><strong>Changed:</strong> the weights are ternary (−1, 0 or +1), trained that way (quantization-aware
-      training) from step 14,655 (29,497,375 tokens) on; the steps before it record no weight format. It is tuned on
-      chats, with the chat format ChatML instead of mini-AGI's own <code>&lt;user&gt;</code>/<code>&lt;bot&gt;</code>
-      tags. And its pool is a fixed <span data-fill="experts">32</span> experts, where mini-AGI grows and prunes its
-      own.</li>
+    <li><strong>Kept:</strong> bytes, no tokenizer; latent recurrence; one shared pool of experts every pass routes
+      into; a halting head; first pretraining text mini-AGI's corpus.</li>
+    <li><strong>Changed:</strong> ternary weights, trained quantization-aware from step 14,655 of its lineage (its
+      format before that is not recorded); tuned on chats; chat format: ChatML instead of mini-AGI's own tags; a fixed
+      <span data-fill="experts">32</span>-expert pool where mini-AGI grows and prunes its own.</li>
   </ul>
 
   <h2>The model</h2>
@@ -618,7 +613,47 @@ Reply with your next message in the conversation, and nothing else.
   <button id="toastOk" type="button">OK</button>
 </div>
 <script type="module">
+var __defProp = Object.defineProperty;
+var __returnValue = (v) => v;
+function __exportSetter(name, newValue) {
+  this[name] = __returnValue.bind(null, newValue);
+}
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, {
+      get: all[name],
+      enumerable: true,
+      configurable: true,
+      set: __exportSetter.bind(all, name)
+    });
+};
+
 // web/kernels.js
+var exports_kernels = {};
+__export(exports_kernels, {
+  ROUTER: () => ROUTER,
+  ROUTE: () => ROUTE,
+  ROPE_KV: () => ROPE_KV,
+  RMSNORM: () => RMSNORM,
+  QMM2: () => QMM2,
+  QMM1: () => QMM1,
+  QMM: () => QMM,
+  INIT: () => INIT,
+  GROUP: () => GROUP,
+  GCLEAR: () => GCLEAR,
+  EXPERT_SUM: () => EXPERT_SUM,
+  EXPERT2G: () => EXPERT2G,
+  EXPERT2: () => EXPERT2,
+  EXPERT13G: () => EXPERT13G,
+  EXPERT13: () => EXPERT13,
+  EXIT: () => EXIT,
+  EMBED: () => EMBED,
+  CAPACITY: () => CAPACITY,
+  ATTN: () => ATTN,
+  ADMIT: () => ADMIT,
+  ADAPTER1: () => ADAPTER1,
+  ADAPTER: () => ADAPTER
+});
 var HEADER = `
 struct G { rows: u32, offset: u32, topk: u32, lohi: u32 }   // lohi: least | most << 16
 struct S { inDim: u32, outDim: u32, rows1: u32, gate: u32,
@@ -1094,13 +1129,52 @@ var EXPERT2 = HEADER + `
 @group(0) @binding(3) var<storage, read> c2: array<u32>;
 @group(0) @binding(4) var<storage, read> s2: array<f32>;
 @group(0) @binding(5) var<storage, read> route: array<u32>;
-@group(0) @binding(6) var<storage, read> x1: array<f32>;
-@group(0) @binding(7) var<storage, read_write> h: array<f32>;
-@group(0) @binding(8) var<storage, read> st: array<u32>;
-var<workgroup> keptW: u32;
+@group(0) @binding(6) var<storage, read_write> ep: array<f32>;
+@group(0) @binding(7) var<storage, read> st: array<u32>;
 var<workgroup> gateOpen: u32;
 var<workgroup> xs: array<f32, 128>;
 var<workgroup> xsum: f32;
+@compute @workgroup_size(64)
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid3: vec3<u32>) {
+  let lid = lid3.x;
+  let p = wid.y; let r = p / 32u; let j = p % 32u;
+  if (lid == 0u) {
+    var open = st[s.gate];
+    if (r >= g.rows || st[HALTED + r] != 0u || j >= st[K] || route[r * 96u + 64u + j] == 0u) { open = 0u; }
+    gateOpen = open;
+  }
+  if (workgroupUniformLoad(&gateOpen) == 0u) { return; }
+  let o = wid.x * 64u + lid;               // of 512
+  let e = route[r * 96u + j];
+  let wt = bitcast<f32>(route[r * 96u + 32u + j]);
+  var acc = 0.0;
+  for (var gi = 0u; gi < 16u; gi++) {
+    for (var i = lid; i < 128u; i += 64u) { xs[i] = eh[p * 2048u + gi * 128u + i]; }
+    workgroupBarrier();
+    if (lid == 0u) { var t = 0.0; for (var q = 0u; q < 128u; q++) { t += xs[q]; } xsum = t; }
+    workgroupBarrier();
+    var part = 0.0;
+    let wbase = (e * 512u + o) * 128u + gi * 8u;
+    for (var w = 0u; w < 8u; w++) {
+      let word = c2[wbase + w];
+      for (var c = 0u; c < 16u; c++) { part += f32((word >> (2u * c)) & 3u) * xs[w * 16u + c]; }
+    }
+    let sc = s2[(e * 512u + o) * 16u + gi];
+    acc += sc * part - sc * xsum;
+    workgroupBarrier();
+  }
+  ep[p * 512u + o] = acc * wt;
+}`;
+var EXPERT_SUM = HEADER + `
+@group(0) @binding(0) var<uniform> g: G;
+@group(0) @binding(1) var<uniform> s: S;
+@group(0) @binding(2) var<storage, read> ep: array<f32>;
+@group(0) @binding(3) var<storage, read> route: array<u32>;
+@group(0) @binding(4) var<storage, read> x1: array<f32>;
+@group(0) @binding(5) var<storage, read_write> h: array<f32>;
+@group(0) @binding(6) var<storage, read> st: array<u32>;
+var<workgroup> keptW: u32;
+var<workgroup> gateOpen: u32;
 @compute @workgroup_size(64)
 fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid3: vec3<u32>) {
   let lid = lid3.x;
@@ -1117,30 +1191,10 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
   }
   if (workgroupUniformLoad(&gateOpen) == 0u) { return; }
   let kept = workgroupUniformLoad(&keptW);
-  let o = wid.x * 64u + lid;               // of 512
+  let o = wid.x * 64u + lid;
   var total = 0.0;
   for (var j = 0u; j < 32u; j++) {
-    if ((kept & (1u << j)) == 0u) { continue; }
-    let e = route[r * 96u + j];
-    let wt = bitcast<f32>(route[r * 96u + 32u + j]);
-    let p = r * 32u + j;
-    var acc = 0.0;
-    for (var gi = 0u; gi < 16u; gi++) {
-      for (var i = lid; i < 128u; i += 64u) { xs[i] = eh[p * 2048u + gi * 128u + i]; }
-      workgroupBarrier();
-      if (lid == 0u) { var t = 0.0; for (var q = 0u; q < 128u; q++) { t += xs[q]; } xsum = t; }
-      workgroupBarrier();
-      var part = 0.0;
-      let wbase = (e * 512u + o) * 128u + gi * 8u;
-      for (var w = 0u; w < 8u; w++) {
-        let word = c2[wbase + w];
-        for (var c = 0u; c < 16u; c++) { part += f32((word >> (2u * c)) & 3u) * xs[w * 16u + c]; }
-      }
-      let sc = s2[(e * 512u + o) * 16u + gi];
-      acc += sc * part - sc * xsum;
-      workgroupBarrier();
-    }
-    total += acc * wt;
+    if ((kept & (1u << j)) != 0u) { total += ep[(r * 32u + j) * 512u + o]; }
   }
   h[r * D + o] = x1[r * D + o] + total;
 }`;
@@ -1214,6 +1268,204 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (i < g.rows) { st[HALTED + i] = 0u; st[CUM + i] = bitcast<u32>(1.0); }
   if (i < 32u) { st[COUNT + i] = 0u; st[NEWLY + i] = 0u; }
   if (i == 0u) { st[COUNT] = g.rows; st[ADMITTED] = 0u; st[REQ] = 0u; st[STEPS] = 0u; }
+}`;
+var QMM1 = HEADER + `
+@group(0) @binding(0) var<uniform> g: G;
+@group(0) @binding(1) var<uniform> s: S;
+@group(0) @binding(2) var<storage, read> x: array<f32>;
+@group(0) @binding(3) var<storage, read> codes: array<u32>;
+@group(0) @binding(4) var<storage, read> scales: array<f32>;
+@group(0) @binding(5) var<storage, read_write> y: array<f32>;
+@group(0) @binding(6) var<storage, read> base: array<f32>;
+@group(0) @binding(7) var<storage, read> st: array<u32>;
+@group(0) @binding(8) var<uniform> hasBase: vec4<u32>;
+${GATE}
+var<workgroup> xs: array<f32, 1408>;
+var<workgroup> xsum: array<f32, 11>;
+var<workgroup> red: array<f32, 64>;
+@compute @workgroup_size(64)
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid3: vec3<u32>) {
+  let lid = lid3.x;
+  if (gateClosed(lid)) { return; }
+  _ = g.rows;
+  let inD = s.inDim; let words = inD / 16u; let groups = inD / 128u;
+  for (var i = lid; i < inD; i += 64u) { xs[i] = x[i]; }
+  workgroupBarrier();
+  if (lid < groups) { var t = 0.0; for (var k = 0u; k < 128u; k++) { t += xs[lid * 128u + k]; } xsum[lid] = t; }
+  workgroupBarrier();
+  let oo = lid / 8u; let lane = lid % 8u; let o = wid.x * 8u + oo;
+  var acc = 0.0;
+  if (o < s.outDim) {
+    for (var w = lane; w < words; w += 8u) {
+      let word = codes[o * words + w];
+      var part = 0.0;
+      for (var c = 0u; c < 16u; c++) { part += f32((word >> (2u * c)) & 3u) * xs[w * 16u + c]; }
+      acc += scales[o * groups + w / 8u] * part;
+    }
+  }
+  red[lid] = acc;
+  workgroupBarrier();
+  if (lane == 0u && o < s.outDim) {
+    var t = 0.0;
+    for (var l = 0u; l < 8u; l++) { t += red[oo * 8u + l]; }
+    for (var gi = 0u; gi < groups; gi++) { t -= scales[o * groups + gi] * xsum[gi]; }
+    y[o] = select(0.0, base[o], hasBase.x != 0u) + t;
+  }
+}`;
+var ADAPTER1 = HEADER + `
+@group(0) @binding(0) var<uniform> g: G;
+@group(0) @binding(1) var<storage, read> h: array<f32>;
+@group(0) @binding(2) var<storage, read> x: array<f32>;
+@group(0) @binding(3) var<storage, read> w: array<vec4<f32>>;
+@group(0) @binding(4) var<storage, read_write> u: array<f32>;
+var<workgroup> xs: array<vec4<f32>, 256>;
+var<workgroup> red: array<f32, 64>;
+@compute @workgroup_size(64)
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid3: vec3<u32>) {
+  let lid = lid3.x;
+  _ = g.rows;
+  for (var i = lid; i < 256u; i += 64u) {
+    let k = i * 4u;
+    xs[i] = select(vec4(x[k - D], x[k + 1u - D], x[k + 2u - D], x[k + 3u - D]), vec4(h[k], h[k + 1u], h[k + 2u], h[k + 3u]), k < D);
+  }
+  workgroupBarrier();
+  let oo = lid / 8u; let lane = lid % 8u; let o = wid.x * 8u + oo;
+  var acc = 0.0;
+  for (var i = lane; i < 256u; i += 8u) { acc += dot(w[o * 256u + i], xs[i]); }
+  red[lid] = acc;
+  workgroupBarrier();
+  if (lane == 0u) {
+    var t = 0.0;
+    for (var l = 0u; l < 8u; l++) { t += red[oo * 8u + l]; }
+    u[o] = t;
+  }
+}`;
+var GCLEAR = HEADER + `
+@group(0) @binding(0) var<storage, read_write> grp: array<u32>;
+@compute @workgroup_size(32)
+fn main(@builtin(local_invocation_id) lid3: vec3<u32>) { grp[lid3.x] = 0u; }`;
+var GROUP = HEADER + `
+@group(0) @binding(0) var<uniform> g: G;
+@group(0) @binding(1) var<uniform> s: S;
+@group(0) @binding(2) var<storage, read> route: array<u32>;
+@group(0) @binding(3) var<storage, read> st: array<u32>;
+@group(0) @binding(4) var<storage, read_write> grp: array<atomic<u32>>;
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let p = gid.x; let r = p / 32u; let j = p % 32u;
+  if (st[s.gate] == 0u || r >= g.rows || st[HALTED + r] != 0u || j >= st[K] || route[r * 96u + 64u + j] == 0u) { return; }
+  let e = route[r * 96u + j];
+  let i = atomicAdd(&grp[e], 1u);
+  atomicStore(&grp[32u + e * 512u + i], p);
+}`;
+var EXPERT13G = HEADER + `
+@group(0) @binding(0) var<uniform> g: G;
+@group(0) @binding(1) var<storage, read> a: array<f32>;
+@group(0) @binding(2) var<storage, read> c1: array<u32>;
+@group(0) @binding(3) var<storage, read> s1: array<f32>;
+@group(0) @binding(4) var<storage, read> c3: array<u32>;
+@group(0) @binding(5) var<storage, read> s3: array<f32>;
+@group(0) @binding(6) var<storage, read> grp: array<u32>;
+@group(0) @binding(7) var<storage, read_write> eh: array<f32>;
+var<workgroup> nW: u32;
+var<workgroup> xs: array<f32, 1024>;
+var<workgroup> xsum: array<f32, 8>;
+@compute @workgroup_size(64)
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid3: vec3<u32>) {
+  let lid = lid3.x;
+  _ = g.rows;
+  let e = wid.y; let t0 = wid.z * 8u;
+  if (lid == 0u) { nW = grp[e]; }
+  let n = workgroupUniformLoad(&nW);
+  if (t0 >= n) { return; }
+  let m = min(8u, n - t0);
+  let o = wid.x * 64u + lid;               // of 2048
+  var a1 = array<f32, 8>(); var a3 = array<f32, 8>();
+  for (var gi = 0u; gi < 4u; gi++) {
+    for (var i = lid; i < 1024u; i += 64u) {
+      let k = i / 128u;
+      var v = 0.0;
+      if (k < m) { v = a[(grp[32u + e * 512u + t0 + k] / 32u) * D + gi * 128u + i % 128u]; }
+      xs[i] = v;
+    }
+    workgroupBarrier();
+    if (lid < 8u) { var t = 0.0; for (var k = 0u; k < 128u; k++) { t += xs[lid * 128u + k]; } xsum[lid] = t; }
+    workgroupBarrier();
+    var p1 = array<f32, 8>(); var p3 = array<f32, 8>();
+    let wbase = (e * 2048u + o) * 32u + gi * 8u;
+    for (var w = 0u; w < 8u; w++) {
+      let w1 = c1[wbase + w]; let w3 = c3[wbase + w];
+      for (var c = 0u; c < 16u; c++) {
+        let q1 = f32((w1 >> (2u * c)) & 3u); let q3 = f32((w3 >> (2u * c)) & 3u);
+        for (var k = 0u; k < 8u; k++) {
+          let xv = xs[k * 128u + w * 16u + c];
+          p1[k] += q1 * xv;
+          p3[k] += q3 * xv;
+        }
+      }
+    }
+    let gs = (e * 2048u + o) * 4u + gi;
+    for (var k = 0u; k < 8u; k++) {
+      a1[k] += s1[gs] * p1[k] - s1[gs] * xsum[k];
+      a3[k] += s3[gs] * p3[k] - s3[gs] * xsum[k];
+    }
+    workgroupBarrier();
+  }
+  for (var k = 0u; k < m; k++) {
+    let p = grp[32u + e * 512u + t0 + k];
+    eh[p * 2048u + o] = (a1[k] / (1.0 + exp(-a1[k]))) * a3[k];
+  }
+}`;
+var EXPERT2G = HEADER + `
+@group(0) @binding(0) var<uniform> g: G;
+@group(0) @binding(1) var<storage, read> eh: array<f32>;
+@group(0) @binding(2) var<storage, read> c2: array<u32>;
+@group(0) @binding(3) var<storage, read> s2: array<f32>;
+@group(0) @binding(4) var<storage, read> route: array<u32>;
+@group(0) @binding(5) var<storage, read> grp: array<u32>;
+@group(0) @binding(6) var<storage, read_write> ep: array<f32>;
+var<workgroup> nW: u32;
+var<workgroup> xs: array<f32, 1024>;
+var<workgroup> xsum: array<f32, 8>;
+@compute @workgroup_size(64)
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid3: vec3<u32>) {
+  let lid = lid3.x;
+  _ = g.rows;
+  let e = wid.y; let t0 = wid.z * 8u;
+  if (lid == 0u) { nW = grp[e]; }
+  let n = workgroupUniformLoad(&nW);
+  if (t0 >= n) { return; }
+  let m = min(8u, n - t0);
+  let o = wid.x * 64u + lid;               // of 512
+  var acc = array<f32, 8>();
+  for (var gi = 0u; gi < 16u; gi++) {
+    for (var i = lid; i < 1024u; i += 64u) {
+      let k = i / 128u;
+      var v = 0.0;
+      if (k < m) { v = eh[grp[32u + e * 512u + t0 + k] * 2048u + gi * 128u + i % 128u]; }
+      xs[i] = v;
+    }
+    workgroupBarrier();
+    if (lid < 8u) { var t = 0.0; for (var q = 0u; q < 128u; q++) { t += xs[lid * 128u + q]; } xsum[lid] = t; }
+    workgroupBarrier();
+    var part = array<f32, 8>();
+    let wbase = (e * 512u + o) * 128u + gi * 8u;
+    for (var w = 0u; w < 8u; w++) {
+      let word = c2[wbase + w];
+      for (var c = 0u; c < 16u; c++) {
+        let q = f32((word >> (2u * c)) & 3u);
+        for (var k = 0u; k < 8u; k++) { part[k] += q * xs[k * 128u + w * 16u + c]; }
+      }
+    }
+    let sc = s2[(e * 512u + o) * 16u + gi];
+    for (var k = 0u; k < 8u; k++) { acc[k] += sc * part[k] - sc * xsum[k]; }
+    workgroupBarrier();
+  }
+  for (var k = 0u; k < m; k++) {
+    let p = grp[32u + e * 512u + t0 + k];
+    let r = p / 32u; let j = p % 32u;
+    ep[p * 512u + o] = acc[k] * bitcast<f32>(route[r * 96u + 32u + j]);
+  }
 }`;
 
 // web/engine.js
@@ -1380,6 +1632,8 @@ class Engine {
       rl: buf(R * 32 * 4),
       route: buf(R * 96 * 4),
       eh: buf(R * 32 * 2048 * 4),
+      ep: buf(R * 32 * D * 4),
+      grp: buf((32 + 32 * R) * 4),
       st: buf(ST.WORDS * 4),
       yf: buf(D * 4),
       logits: buf(272 * 4),
@@ -1390,7 +1644,8 @@ class Engine {
     this.g = dev.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.read = dev.createBuffer({ size: 272 * 4 + 16, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
     this.cf = shape.cf;
-    this.#build();
+    this.ops = this.#build(false);
+    this.ops1 = this.#build(true);
   }
   #pipe(code) {
     this.pipes ??= new Map;
@@ -1420,13 +1675,14 @@ class Engine {
       layout: pipe.getBindGroupLayout(0),
       entries: entries.map((resource, binding) => ({ binding, resource: { buffer: resource } }))
     });
-    return { pipe, bind, groups };
+    const name = Object.entries(exports_kernels).find(([, c]) => c === code)?.[0] ?? "?";
+    return { pipe, bind, groups, name };
   }
-  #build() {
+  #build(one) {
     const { b, w, g } = this;
     const has0 = this.#uniform(new Uint32Array([0, 0, 0, 0]));
     const has1 = this.#uniform(new Uint32Array([1, 0, 0, 0]));
-    const qmm = (x, wt, y, inDim, outDim, { base = null, gate = NONE, rows1 = 0 } = {}) => this.#op(QMM, [
+    const qmm = (x, wt, y, inDim, outDim, { base = null, gate = NONE, rows1 = 0 } = {}) => one || rows1 ? this.#op(QMM1, [
       g,
       this.#s({ inDim, outDim, gate, rows1 }),
       x,
@@ -1436,7 +1692,17 @@ class Engine {
       base ?? b.u,
       b.st,
       base ? has1 : has0
-    ], (rows) => [Math.ceil(outDim / 64), rows1 ? 1 : Math.ceil(rows / 8)]);
+    ], () => [Math.ceil(outDim / 8)]) : this.#op(QMM, [
+      g,
+      this.#s({ inDim, outDim, gate, rows1 }),
+      x,
+      wt.codes,
+      wt.scales,
+      y,
+      base ?? b.u,
+      b.st,
+      base ? has1 : has0
+    ], (rows) => [Math.ceil(outDim / 64), Math.ceil(rows / 8)]);
     const norm = (x, wt, y) => this.#op(RMSNORM, [g, x, wt, y], (rows) => [rows]);
     const ropeKv = (slot) => this.#op(ROPE_KV, [g, b.qkv, b.rope, this.kv[slot].k, this.kv[slot].v], (rows) => [Math.ceil(rows * 256 / 256)]);
     const attn = (slot, gate) => this.#op(ATTN, [
@@ -1468,20 +1734,28 @@ class Engine {
       const slot = SLOTS_PRE + n;
       const gate = ST.COUNT + n;
       const s = this.#s({ gate, pass: n, first: n === 0 ? 1 : 0, last: n === this.maxSteps - 1 ? 1 : 0 });
-      ops.push(this.#op(ADAPTER, [g, b.h, b.x, w.adapter, b.u], (rows) => [D / 64, Math.ceil(rows / 8)]), norm(b.u, r.ln1, b.a), qmm(b.a, r.qkv, b.qkv, D, QKV), ropeKv(slot), attn(slot, gate), qmm(b.att, r.proj, b.x1, D, D, { base: b.u, gate }), norm(b.x1, r.ln2, b.a), this.#op(ROUTER, [g, s, b.a, r.depth, r.router, b.rl, b.st], (rows) => [rows]), this.#op(ADMIT, [s, b.st, g], () => [1]), this.#op(ROUTE, [g, s, b.rl, pool.gate, b.route, b.st], (rows) => [Math.ceil(rows / 64)]), this.#op(CAPACITY, [g, s, b.route, b.st], () => [1]), this.#op(EXPERT13, [
-        g,
-        s,
-        b.a,
-        pool.w1.codes,
-        pool.w1.scales,
-        pool.w3.codes,
-        pool.w3.scales,
-        b.route,
-        b.eh,
-        b.st
-      ], (rows) => [2048 / 64, rows * 32]), this.#op(EXPERT2, [g, s, b.eh, pool.w2.codes, pool.w2.scales, b.route, b.x1, b.h, b.st], (rows) => [D / 64, rows]), this.#op(EXIT, [g, s, b.h, w.lnf, w.halt, b.yf, b.st], (rows) => [rows]), qmm(b.yf, w.emb, b.logits, D, 265, { gate: ST.NEWLY + n, rows1: 1 }));
+      ops.push(one ? this.#op(ADAPTER1, [g, b.h, b.x, w.adapter, b.u], () => [D / 8]) : this.#op(ADAPTER, [g, b.h, b.x, w.adapter, b.u], (rows) => [D / 64, Math.ceil(rows / 8)]), norm(b.u, r.ln1, b.a), qmm(b.a, r.qkv, b.qkv, D, QKV), ropeKv(slot), attn(slot, gate), qmm(b.att, r.proj, b.x1, D, D, { base: b.u, gate }), norm(b.x1, r.ln2, b.a), this.#op(ROUTER, [g, s, b.a, r.depth, r.router, b.rl, b.st], (rows) => [rows]), this.#op(ADMIT, [s, b.st, g], () => [1]), this.#op(ROUTE, [g, s, b.rl, pool.gate, b.route, b.st], (rows) => [Math.ceil(rows / 64)]), this.#op(CAPACITY, [g, s, b.route, b.st], () => [1]), ...one ? [
+        this.#op(EXPERT13, [
+          g,
+          s,
+          b.a,
+          pool.w1.codes,
+          pool.w1.scales,
+          pool.w3.codes,
+          pool.w3.scales,
+          b.route,
+          b.eh,
+          b.st
+        ], (rows) => [2048 / 64, rows * 32]),
+        this.#op(EXPERT2, [g, s, b.eh, pool.w2.codes, pool.w2.scales, b.route, b.ep, b.st], (rows) => [D / 64, rows * 32])
+      ] : [
+        this.#op(GCLEAR, [b.grp], () => [1]),
+        this.#op(GROUP, [g, s, b.route, b.st, b.grp], (rows) => [Math.ceil(rows * 32 / 64)]),
+        this.#op(EXPERT13G, [g, b.a, pool.w1.codes, pool.w1.scales, pool.w3.codes, pool.w3.scales, b.grp, b.eh], (rows) => [2048 / 64, 32, Math.ceil(rows / 8)]),
+        this.#op(EXPERT2G, [g, b.eh, pool.w2.codes, pool.w2.scales, b.route, b.grp, b.ep], (rows) => [D / 64, 32, Math.ceil(rows / 8)])
+      ], this.#op(EXPERT_SUM, [g, s, b.ep, b.route, b.x1, b.h, b.st], (rows) => [D / 64, rows]), this.#op(EXIT, [g, s, b.h, w.lnf, w.halt, b.yf, b.st], (rows) => [rows]), qmm(b.yf, w.emb, b.logits, D, 265, { gate: ST.NEWLY + n, rows1: 1 }));
     }
-    this.ops = ops;
+    return ops;
   }
   reset() {
     this.offset = 0;
@@ -1501,6 +1775,35 @@ class Engine {
     this.device.queue.submit([enc.finish()]);
     this.offset = keep;
   }
+  async profile(ids) {
+    const rows = ids.length, dev = this.device, q = dev.queue, ops = rows === 1 ? this.ops1 : this.ops, n = ops.length;
+    this.#trim(this.block - rows);
+    q.writeBuffer(this.b.ids, 0, new Uint32Array(ids));
+    q.writeBuffer(this.g, 0, new Uint32Array([rows, this.offset, this.topK, this.least | this.most << 16]));
+    const set = dev.createQuerySet({ type: "timestamp", count: 2 * n });
+    const res = dev.createBuffer({ size: 16 * n, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC });
+    const out = dev.createBuffer({ size: 16 * n, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    const enc = dev.createCommandEncoder();
+    ops.forEach((op, i) => {
+      const pass = enc.beginComputePass({ timestampWrites: { querySet: set, beginningOfPassWriteIndex: 2 * i, endOfPassWriteIndex: 2 * i + 1 } });
+      pass.setPipeline(op.pipe);
+      pass.setBindGroup(0, op.bind);
+      pass.dispatchWorkgroups(...op.groups(rows));
+      pass.end();
+    });
+    enc.resolveQuerySet(set, 0, 2 * n, res, 0);
+    enc.copyBufferToBuffer(res, 0, out, 0, 16 * n);
+    q.submit([enc.finish()]);
+    await out.mapAsync(GPUMapMode.READ);
+    const t = new BigUint64Array(out.getMappedRange());
+    const each = ops.map((op, i) => [op.name, Number(t[2 * i + 1] - t[2 * i]) / 1e6]);
+    out.unmap();
+    set.destroy();
+    res.destroy();
+    out.destroy();
+    this.offset += rows;
+    return each;
+  }
   async forward(ids) {
     const rows = ids.length;
     if (rows < 1 || rows > MAX_ROWS)
@@ -1516,7 +1819,7 @@ class Engine {
     q.writeBuffer(this.g, 0, new Uint32Array([rows, this.offset, this.topK, this.least | this.most << 16]));
     const enc = this.device.createCommandEncoder();
     const pass = enc.beginComputePass();
-    for (const op of this.ops) {
+    for (const op of rows === 1 ? this.ops1 : this.ops) {
       pass.setPipeline(op.pipe);
       pass.setBindGroup(0, op.bind);
       pass.dispatchWorkgroups(...op.groups(rows));
