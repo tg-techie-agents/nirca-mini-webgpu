@@ -54,12 +54,14 @@
   <p class="lede">A small chat model, trained from scratch on a Mac, that runs in your browser.</p>
 
   <!--ABOUT-->
+  <p>Nirca Mini is a small chat model trained from scratch, with ternary weights: its linear layers' weights are
+    -1, 0 or +1, with a scale and a bias for each block of <span data-fill="group">128</span> weights. It reads and
+    writes bytes, so it needs no tokenizer. It is published as it trains: each new checkpoint replaces
+    <code>latest/</code>.</p>
   <ul class="headline">
     <li><strong>Small:</strong> about <span data-fill="params">109 million</span> parameters.</li>
-    <li><strong>Trained from scratch with quantization-aware training, in ternary:</strong> from step 14,655 of
-      <span data-fill="step">62,895</span>, so for <span data-fill="ternaryShare">98%</span> of its
-      <span data-fill="tokens">1,217,308,397</span> tokens; the ternary weights were learned in training, not
-      quantized after it.</li>
+    <li><strong>Trained from scratch in ternary,</strong> with quantization-aware training from almost the very
+      start; the ternary weights were learned in training, not quantized after.</li>
   </ul>
   <h2>Where it comes from</h2>
   <p>Nirca was inspired by <a href="https://github.com/volotat/mini-AGI">mini-AGI</a>, and its architecture is
@@ -101,6 +103,8 @@
     loads newer checkpoints as they are published.</p>
 
   <h2>How it is trained</h2>
+  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">62,895</span>, so for
+    <span data-fill="ternaryShare">98%</span> of its <span data-fill="tokens">1,217,308,397</span> tokens</p>
   <div class="diagram"><svg viewBox="0 0 720 300" role="img" aria-labelledby="dtitle">
     <title id="dtitle">Training: open chat datasets and synthetic and private chats are prepared (anonymised,
       put in ChatML, cut to fit, swept for leaks) for the trainer, which writes checkpoints; checkpoints are
