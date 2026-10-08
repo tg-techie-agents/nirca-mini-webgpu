@@ -82,21 +82,22 @@
 
   <h2>How it is trained</h2>
   <div class="diagram"><svg viewBox="0 0 720 300" role="img" aria-labelledby="dtitle">
-    <title id="dtitle">Training: the data passes a leak sweep into the trainer, which writes
-      checkpoints; checkpoints are scored and published to this page.</title>
+    <title id="dtitle">Training: open chat datasets and synthetic and private chats are prepared (anonymised,
+      put in ChatML, cut to fit, swept for leaks) for the trainer, which writes checkpoints; checkpoints are
+      scored and published to this page.</title>
     <defs><marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
     <rect class="box" x="10" y="20" width="200" height="74" rx="10"/>
-    <text x="24" y="44">SmolTalk-2 conversations</text>
-    <text class="small" x="24" y="62">open chat data, cut to</text>
-    <text class="small" x="24" y="77">chats that fit the context</text>
+    <text x="24" y="44">Open chat datasets</text>
+    <text class="small" x="24" y="62">public collections of chats,</text>
+    <text class="small" x="24" y="77">and of reasoning chats</text>
     <rect class="box" x="10" y="120" width="200" height="74" rx="10"/>
-    <text x="24" y="144">Synthetic chats</text>
-    <text class="small" x="24" y="162">written by open models,</text>
-    <text class="small" x="24" y="177">steered by the charter</text>
+    <text x="24" y="144">Synthetic and private chats</text>
+    <text class="small" x="24" y="162">synthetic: steered by the charter</text>
+    <text class="small" x="24" y="177">private: anonymised first</text>
     <rect class="box" x="260" y="70" width="170" height="74" rx="10"/>
-    <text x="274" y="94">Leak sweep</text>
-    <text class="small" x="274" y="112">drops chats that share text</text>
-    <text class="small" x="274" y="127">with the held-out test sets</text>
+    <text x="274" y="94">Preparation</text>
+    <text class="small" x="274" y="112">ChatML, cut to fit, and a</text>
+    <text class="small" x="274" y="127">sweep against the test sets</text>
     <rect class="box" x="480" y="70" width="230" height="74" rx="10"/>
     <text x="494" y="94">Trainer</text>
     <text class="small" x="494" y="112">trains the model on the mix,</text>
@@ -122,20 +123,36 @@
 
   <p>What the model reads, from Nirca's training records:</p>
   <ul>
-    <li><strong>SmolTalk-2</strong>, Hugging Face's open collection of chats, cut to conversations that fit the
-      context. This is most of it.</li>
-    <li><strong>Synthetic chats</strong> written by open models: in each chat, one model plays a person and the
-      other plays Nirca Mini, following the charter below. Chats are filtered before training: replies that
-      question back too often, run too long, or break the charter are redrawn or dropped, and a check drops
-      chats holding personal details.</li>
+    <li><strong>Open chat datasets</strong>: public collections of conversations, and of reasoning written out as
+      conversations. These are most of it.</li>
+    <li><strong>Synthetic chats</strong> written by open-weight models: in each chat, one model plays a person and
+      the other plays Nirca Mini, following the charter below.</li>
     <li>In some checkpoints, a small set of real conversations, anonymised before training.</li>
   </ul>
-  <p>Every set is swept for text shared with the held-out test sets before anything trains on it. Which
-    sets, and in what shares, changes from checkpoint to checkpoint.</p>
+  <p>How a chat becomes something the model trains on:</p>
+  <ol>
+    <li><strong>Anonymised.</strong> In the real conversations, names, places, contact details and other personal
+      details are replaced by placeholders, and a checkpoint trained on them is published only once their set is
+      registered as anonymised.</li>
+    <li><strong>Filtered.</strong> Synthetic chats whose replies question back too often, run too long, or break
+      the charter are redrawn or dropped, and a check drops chats holding personal details.</li>
+    <li><strong>Put in ChatML.</strong> Every chat, whatever its source, is written in one format: each turn opens
+      with <code>&lt;|im_start|&gt;</code> and its speaker, and closes with <code>&lt;|im_end|&gt;</code>. Reasoning
+      sets are reformatted into it. The chat page sends the model the same format.</li>
+    <li><strong>Cut to fit.</strong> Only chats whose whole text fits the model's context,
+      <span data-fill="context">2,048</span> bytes, are kept.</li>
+    <li><strong>Swept for leaks.</strong> Chats that share text with the held-out test sets are dropped, by
+      their content rather than by file, and a set whose training and test parts overlap is refused.</li>
+    <li><strong>Trained.</strong> The model learns to predict the next byte, counting its mistakes only on Nirca
+      Mini's own turns, with its weights ternary from the first step.</li>
+    <li><strong>Scored and published.</strong> Each checkpoint is scored on held-out chats. A program publishes it,
+      and this page loads the newest.</li>
+  </ol>
+  <p>Which sets, and in what shares, changes from checkpoint to checkpoint.</p>
   <div data-dated="2026-10-07">
   <p>The first checkpoint published here, step 62,377 (2026-10-07), was trained on:</p>
   <ul>
-    <li><strong>SmolTalk-2</strong>: about 460,000 conversations of at most 2,048 bytes. The leak sweep had dropped
+    <li><strong>Open chat</strong>: about 460,000 conversations of at most 2,048 bytes. The leak sweep had dropped
       about 6,500 more that shared text with held-out evaluation sets.</li>
     <li><strong>About 1,000 synthetic chats</strong> written by two open models, Gemma 4 31B and Qwen 3.8 27B, under
       earlier drafts of the charter. These made up about 7% of what the model read in that stretch of training.</li>

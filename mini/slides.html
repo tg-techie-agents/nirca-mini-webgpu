@@ -292,7 +292,7 @@
       </div>
     </div>
     <div class="notes">The big run was paused, kept exactly, and a smaller copy cut from it to push toward coherence.
-      Most data is open chat (SmolTalk-2, conversations under 2K bytes); 15% is synthetic chats written to show the
+      Most data is open chat datasets (conversations under 2K bytes); 15% is synthetic chats written to show the
       character we want.</div>
   </section>
 
@@ -514,7 +514,7 @@ cards("v-auto", [
   const bx = 20, by = 380, bw = 840;
   g += `<rect x="${bx}" y="${by}" width="${bw * 0.85}" height="48" fill="#2f5d50" rx="6"/>`;
   g += `<rect x="${bx + bw * 0.85}" y="${by}" width="${bw * 0.15}" height="48" fill="#b4532a" rx="6"/>`;
-  g += t(bx + 16, by + 33, "open chat (SmolTalk-2), 85%", 22, "", "start", 600).replace("<text", '<text style="fill:#fff"');
+  g += t(bx + 16, by + 33, "open chat datasets, 85%", 22, "", "start", 600).replace("<text", '<text style="fill:#fff"');
   g += t(bx + bw * 0.85 + 10, by + 33, "15%", 22, "", "start", 600).replace("<text", '<text style="fill:#fff"');
   g += t(bx, by + 80, "the data: chats under 2,048 bytes, and synthetic chats written for the Mini", 22, "m");
   svg(document.getElementById("v-cut"), g);

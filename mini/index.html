@@ -146,8 +146,21 @@ SOFTWARE.
   label.small input { width: 64px; color: var(--ink); background: var(--panel);
     border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
   .hint { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 12px; }
-  #newChat { padding: 4px 10px; font-size: 14px; white-space: nowrap; flex: none; }
-  body:not(.chat) #newChat { display: none; }
+  #newChat, #chatsButton { padding: 4px 10px; font-size: 14px; white-space: nowrap; flex: none; }
+  body:not(.chat) #newChat, body:not(.chat) #chatsButton { display: none; }
+  #chatsButton[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+  /* saved chats: one row each, the open one marked; the list scrolls, the chat stays below it */
+  #chats { flex: none; max-height: min(50vh, 360px); overflow-y: auto; padding: 6px; }
+  #chatList { list-style: none; margin: 0; padding: 0; }
+  #chatList li { display: flex; align-items: stretch; gap: 4px; }
+  #chatList li + li { border-top: 1px solid var(--line); }
+  #chatList .open { flex: 1; min-width: 0; text-align: left; border: 0; background: none; padding: 8px; border-radius: 8px;
+    display: flex; flex-direction: column; gap: 1px; }
+  #chatList .open .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #chatList .open .d { color: var(--muted); font-size: 12px; }
+  #chatList li[aria-current="true"] .open { background: var(--soft); }
+  #chatList .del { border: 0; background: none; color: var(--muted); padding: 0 12px; font-size: 18px; }
+  #chats .hint { padding: 8px; }
 
   /* the reading tabs */
   .read { padding: 8px 0 40px; line-height: 1.6; }
@@ -184,9 +197,10 @@ SOFTWARE.
   <header>
     <div class="titlebar">
       <h1>Nirca Mini, in your browser</h1>
+      <button id="chatsButton" type="button" aria-expanded="false" aria-controls="chats">Chats</button>
       <button id="newChat" type="button" disabled>New chat</button>
     </div>
-    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v20, built 2026-10-08 from 2119da8">site v20</span></p>
+    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v21, built 2026-10-08 from 8bd2f69">site v21</span></p>
     <nav aria-label="Pages">
       <a href="#chat" data-tab="chat" aria-current="page">Chat</a>
       <a href="#about" data-tab="about">About</a>
@@ -196,6 +210,10 @@ SOFTWARE.
   </header>
 
   <main id="chatTab">
+    <section class="panel" id="chats" hidden aria-label="Saved chats">
+      <ul id="chatList"></ul>
+      <p class="hint" id="chatsNone">No saved chats yet. A chat is kept in this browser once it has a reply.</p>
+    </section>
     <section class="panel" id="loader">
       <div class="row">
         <div class="grow" id="loadText">Loading the model: <span data-fill="mb">33</span> MB the first time, then from your browser's cache.</div>
@@ -267,21 +285,22 @@ SOFTWARE.
 
   <h2>How it is trained</h2>
   <div class="diagram"><svg viewBox="0 0 720 300" role="img" aria-labelledby="dtitle">
-    <title id="dtitle">Training: the data passes a leak sweep into the trainer, which writes
-      checkpoints; checkpoints are scored and published to this page.</title>
+    <title id="dtitle">Training: open chat datasets and synthetic and private chats are prepared (anonymised,
+      put in ChatML, cut to fit, swept for leaks) for the trainer, which writes checkpoints; checkpoints are
+      scored and published to this page.</title>
     <defs><marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z"/></marker></defs>
     <rect class="box" x="10" y="20" width="200" height="74" rx="10"/>
-    <text x="24" y="44">SmolTalk-2 conversations</text>
-    <text class="small" x="24" y="62">open chat data, cut to</text>
-    <text class="small" x="24" y="77">chats that fit the context</text>
+    <text x="24" y="44">Open chat datasets</text>
+    <text class="small" x="24" y="62">public collections of chats,</text>
+    <text class="small" x="24" y="77">and of reasoning chats</text>
     <rect class="box" x="10" y="120" width="200" height="74" rx="10"/>
-    <text x="24" y="144">Synthetic chats</text>
-    <text class="small" x="24" y="162">written by open models,</text>
-    <text class="small" x="24" y="177">steered by the charter</text>
+    <text x="24" y="144">Synthetic and private chats</text>
+    <text class="small" x="24" y="162">synthetic: steered by the charter</text>
+    <text class="small" x="24" y="177">private: anonymised first</text>
     <rect class="box" x="260" y="70" width="170" height="74" rx="10"/>
-    <text x="274" y="94">Leak sweep</text>
-    <text class="small" x="274" y="112">drops chats that share text</text>
-    <text class="small" x="274" y="127">with the held-out test sets</text>
+    <text x="274" y="94">Preparation</text>
+    <text class="small" x="274" y="112">ChatML, cut to fit, and a</text>
+    <text class="small" x="274" y="127">sweep against the test sets</text>
     <rect class="box" x="480" y="70" width="230" height="74" rx="10"/>
     <text x="494" y="94">Trainer</text>
     <text class="small" x="494" y="112">trains the model on the mix,</text>
@@ -307,20 +326,36 @@ SOFTWARE.
 
   <p>What the model reads, from Nirca's training records:</p>
   <ul>
-    <li><strong>SmolTalk-2</strong>, Hugging Face's open collection of chats, cut to conversations that fit the
-      context. This is most of it.</li>
-    <li><strong>Synthetic chats</strong> written by open models: in each chat, one model plays a person and the
-      other plays Nirca Mini, following the charter below. Chats are filtered before training: replies that
-      question back too often, run too long, or break the charter are redrawn or dropped, and a check drops
-      chats holding personal details.</li>
+    <li><strong>Open chat datasets</strong>: public collections of conversations, and of reasoning written out as
+      conversations. These are most of it.</li>
+    <li><strong>Synthetic chats</strong> written by open-weight models: in each chat, one model plays a person and
+      the other plays Nirca Mini, following the charter below.</li>
     <li>In some checkpoints, a small set of real conversations, anonymised before training.</li>
   </ul>
-  <p>Every set is swept for text shared with the held-out test sets before anything trains on it. Which
-    sets, and in what shares, changes from checkpoint to checkpoint.</p>
+  <p>How a chat becomes something the model trains on:</p>
+  <ol>
+    <li><strong>Anonymised.</strong> In the real conversations, names, places, contact details and other personal
+      details are replaced by placeholders, and a checkpoint trained on them is published only once their set is
+      registered as anonymised.</li>
+    <li><strong>Filtered.</strong> Synthetic chats whose replies question back too often, run too long, or break
+      the charter are redrawn or dropped, and a check drops chats holding personal details.</li>
+    <li><strong>Put in ChatML.</strong> Every chat, whatever its source, is written in one format: each turn opens
+      with <code>&lt;|im_start|&gt;</code> and its speaker, and closes with <code>&lt;|im_end|&gt;</code>. Reasoning
+      sets are reformatted into it. The chat page sends the model the same format.</li>
+    <li><strong>Cut to fit.</strong> Only chats whose whole text fits the model's context,
+      <span data-fill="context">2,048</span> bytes, are kept.</li>
+    <li><strong>Swept for leaks.</strong> Chats that share text with the held-out test sets are dropped, by
+      their content rather than by file, and a set whose training and test parts overlap is refused.</li>
+    <li><strong>Trained.</strong> The model learns to predict the next byte, counting its mistakes only on Nirca
+      Mini's own turns, with its weights ternary from the first step.</li>
+    <li><strong>Scored and published.</strong> Each checkpoint is scored on held-out chats. A program publishes it,
+      and this page loads the newest.</li>
+  </ol>
+  <p>Which sets, and in what shares, changes from checkpoint to checkpoint.</p>
   <div data-dated="2026-10-07">
   <p>The first checkpoint published here, step 62,377 (2026-10-07), was trained on:</p>
   <ul>
-    <li><strong>SmolTalk-2</strong>: about 460,000 conversations of at most 2,048 bytes. The leak sweep had dropped
+    <li><strong>Open chat</strong>: about 460,000 conversations of at most 2,048 bytes. The leak sweep had dropped
       about 6,500 more that shared text with held-out evaluation sets.</li>
     <li><strong>About 1,000 synthetic chats</strong> written by two open models, Gemma 4 31B and Qwen 3.8 27B, under
       earlier drafts of the charter. These made up about 7% of what the model read in that stretch of training.</li>
@@ -1965,6 +2000,8 @@ function setChatEnabled(on) {
   $("input").disabled = !on || busy;
   $("send").disabled = !on || busy;
   $("newChat").disabled = !on || busy || !messages.length;
+  for (const b of $("chatList").querySelectorAll("button"))
+    b.disabled = busy;
   $("update").disabled = busy;
 }
 function bubble(role, text, meta = "") {
@@ -1987,8 +2024,9 @@ var toEnd = () => {
   c.scrollTop = c.scrollHeight;
   atEnd = true;
 };
-var SAVED = "nirca-mini-chat-v1";
+var CHATS = "nirca-mini-chats-v1";
 var SETTINGS = "nirca-mini-settings-v1";
+var OLD_CHAT = "nirca-mini-chat-v1";
 function store(key, value) {
   try {
     value === null ? localStorage.removeItem(key) : localStorage.setItem(key, JSON.stringify(value));
@@ -2001,8 +2039,87 @@ function stored(key) {
     return null;
   }
 }
-var saveChat = () => store(SAVED, messages.length ? messages : null);
+var isMessages = (m) => Array.isArray(m) && m.every((x) => x && (x.role === "user" || x.role === "assistant") && typeof x.content === "string");
+var chats = {};
+var openId = null;
+function loadChats() {
+  const s = stored(CHATS);
+  if (s && typeof s.chats === "object") {
+    for (const [id, c] of Object.entries(s.chats))
+      if (c && isMessages(c.messages) && c.messages.length)
+        chats[id] = c;
+    openId = chats[s.open] ? s.open : null;
+  }
+  const old = stored(OLD_CHAT);
+  if (isMessages(old) && old.length) {
+    const id = `c${Date.now()}`;
+    chats[id] = { title: titleOf(old), updated: Date.now(), messages: old };
+    openId = id;
+    store(CHATS, { open: openId, chats });
+    store(OLD_CHAT, null);
+  }
+}
+var titleOf = (m) => (m.find((x) => x.role === "user")?.content.trim().replace(/\s+/g, " ") ?? "Chat").slice(0, 80);
+function saveChat(changed = true) {
+  if (messages.length && changed) {
+    openId ??= `c${Date.now()}`;
+    chats[openId] = { title: titleOf(messages), updated: Date.now(), messages };
+  }
+  store(CHATS, { open: openId, chats });
+  renderChats();
+}
 var saveSettings = () => store(SETTINGS, Object.fromEntries(Object.keys(DEFAULTS).map((id) => [id, $(id).value])));
+var when = (t) => new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+function renderChats() {
+  const list = $("chatList");
+  list.replaceChildren();
+  const ids = Object.keys(chats).sort((a, b) => chats[b].updated - chats[a].updated);
+  $("chatsNone").hidden = ids.length > 0;
+  for (const id of ids) {
+    const c = chats[id];
+    const li = document.createElement("li");
+    if (id === openId)
+      li.setAttribute("aria-current", "true");
+    const open = Object.assign(document.createElement("button"), { type: "button", className: "open", disabled: busy });
+    const replies = c.messages.filter((x) => x.role === "assistant").length;
+    open.append(Object.assign(document.createElement("span"), { className: "t", textContent: c.title }), Object.assign(document.createElement("span"), { className: "d", textContent: `${when(c.updated)} · ${replies} ${replies === 1 ? "reply" : "replies"}` }));
+    open.addEventListener("click", () => {
+      showChat(id);
+      toggleChats(false);
+    });
+    const del = Object.assign(document.createElement("button"), { type: "button", className: "del", textContent: "×", disabled: busy });
+    del.setAttribute("aria-label", `Delete the chat "${c.title}"`);
+    del.addEventListener("click", () => {
+      delete chats[id];
+      if (id === openId)
+        showChat(null);
+      else
+        saveChat(false);
+    });
+    li.append(open, del);
+    list.append(li);
+  }
+}
+function showChat(id) {
+  if (busy)
+    return;
+  openId = chats[id] ? id : null;
+  messages = openId ? chats[openId].messages : [];
+  for (const el of [...$("chat").querySelectorAll(".msg")])
+    el.remove();
+  $("empty").hidden = messages.length > 0;
+  for (const x of messages)
+    bubble(x.role === "user" ? "user" : "bot", x.role === "user" ? x.content.trim() : x.content, x.meta ?? "");
+  saveChat(false);
+  setChatEnabled(!!engine);
+  toEnd();
+}
+function toggleChats(on = $("chats").hidden) {
+  $("chats").hidden = !on;
+  $("chatsButton").setAttribute("aria-expanded", String(on));
+  if (on)
+    renderChats();
+}
 function restore() {
   const s = stored(SETTINGS);
   if (s) {
@@ -2010,13 +2127,14 @@ function restore() {
       if (s[id] !== undefined)
         $(id).value = s[id];
   }
-  const m = stored(SAVED);
-  if (Array.isArray(m) && m.every((x) => x && (x.role === "user" || x.role === "assistant") && typeof x.content === "string")) {
-    messages = m;
-    for (const x of messages)
-      bubble(x.role === "user" ? "user" : "bot", x.role === "user" ? x.content.trim() : x.content, x.meta ?? "");
-  }
+  loadChats();
+  showChat(openId);
 }
+function modelOf(config) {
+  const checkpoint = String(config?.checkpoint ?? "").match(/([^/]+)\/?$/)?.[1] ?? null;
+  return { name: config?.name ?? null, step: config?.step ?? null, checkpoint };
+}
+var modelText = (m) => `step ${Number(m.step).toLocaleString("en-US")}${m.checkpoint ? ` (checkpoint ${m.checkpoint})` : ""}`;
 async function send(text) {
   if (!engine || busy || !text.trim())
     return;
@@ -2035,6 +2153,7 @@ async function send(text) {
   engine.topK = clampInput("topK", 1, experts, Math.min(DEFAULTS.topK, experts));
   engine.least = clampInput("least", 1, engine.maxSteps, 1);
   engine.most = clampInput("most", engine.least, engine.maxSteps, engine.maxSteps);
+  const model = modelOf(current?.config);
   const out = new TextOut;
   let reply = "", n = 0, passes = 0, tStart = 0, ended = "";
   const t0 = performance.now();
@@ -2063,9 +2182,9 @@ async function send(text) {
     const meta = document.createElement("span");
     meta.className = "meta";
     const why = { end: "", cap: " · stopped at the length limit", stopped: " · stopped" }[ended] ?? "";
-    meta.textContent = `${n} bytes · ${(n / s).toFixed(1)} bytes/s · read ${prompt.length} in ` + `${((tStart - t0) / 1000).toFixed(1)} s · ${n ? (passes / n).toFixed(1) : 0} passes per byte · ` + `${engine.topK} experts per byte${why}`;
+    meta.textContent = `${modelText(model)} · ${n} bytes · ${(n / s).toFixed(1)} bytes/s · read ${prompt.length} in ` + `${((tStart - t0) / 1000).toFixed(1)} s · ${n ? (passes / n).toFixed(1) : 0} passes per byte · ` + `${engine.topK} experts per byte${why}`;
     el.append(meta);
-    messages.push({ role: "assistant", content: reply, meta: meta.textContent });
+    messages.push({ role: "assistant", content: reply, meta: meta.textContent, model });
     saveChat();
     $("genStatus").textContent = "";
   } catch (e) {
@@ -2119,14 +2238,11 @@ $("resetSettings").addEventListener("click", () => {
 for (const id of Object.keys(DEFAULTS))
   $(id).addEventListener("change", saveSettings);
 $("newChat").addEventListener("click", () => {
-  messages = [];
-  saveChat();
-  for (const el of [...$("chat").querySelectorAll(".msg")])
-    el.remove();
-  $("empty").hidden = false;
-  setChatEnabled(true);
+  showChat(null);
+  toggleChats(false);
   $("input").focus();
 });
+$("chatsButton").addEventListener("click", () => toggleChats());
 window.__chat = { get ready() {
   return !!engine && !busy;
 }, get step() {
@@ -2135,6 +2251,10 @@ window.__chat = { get ready() {
   return busy;
 }, get messages() {
   return messages;
+}, get chats() {
+  return chats;
+}, get openId() {
+  return openId;
 } };
 var TABS = ["chat", "about", "charter"];
 function showTab() {
