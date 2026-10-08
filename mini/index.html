@@ -1617,7 +1617,7 @@ async function* generate(engine, prompt, maxNew, end, { record = false, stop } =
 
 // web/app.js
 var PUBLISHED_WEIGHTS = "https://tg-techie-agents.github.io/nirca-mini-webgpu/weights/";
-var LATEST_MANIFEST = PUBLISHED_WEIGHTS + "config.json";
+var LATEST_MANIFEST = "https://huggingface.co/nirca/nirca-mini/resolve/main/latest.json";
 var params = new URLSearchParams(location.search);
 var slash = (u) => u.endsWith("/") ? u : u + "/";
 var latestUrl = () => new URL(params.get("latest") ?? LATEST_MANIFEST, location.href).href;
@@ -1626,13 +1626,30 @@ function weightCandidates() {
   if (given)
     return [slash(given)];
   const near = location.protocol === "file:" || location.origin === new URL(PUBLISHED_WEIGHTS).origin ? [] : ["weights/"];
-  return [...new Set([latestBase(null), ...near, PUBLISHED_WEIGHTS])];
+  return [...new Set([...near, PUBLISHED_WEIGHTS])];
 }
 function latestBase(manifest) {
-  return slash(new URL(manifest?.url ?? ".", latestUrl()).href);
+  return slash(new URL(manifest?.checkpoint ?? manifest?.url ?? ".", latestUrl()).href);
+}
+async function readLatest() {
+  const res = await fetch(latestUrl(), { cache: "no-cache" });
+  if (!res.ok)
+    throw new Error(`HTTP ${res.status}`);
+  const m = await res.json();
+  if (!(Number.isInteger(m?.step) && m.cfg && typeof m.cfg === "object" && m.name))
+    throw new Error("the manifest lacks step, name or cfg");
+  return m;
 }
 async function findWeights() {
   const tried = [];
+  if (!params.get("weights")) {
+    try {
+      const manifest = await readLatest();
+      return [latestBase(manifest), manifest];
+    } catch (e) {
+      tried.push(`${latestUrl()}: ${e.message ?? e}`);
+    }
+  }
   for (const base of weightCandidates()) {
     try {
       const res = await fetch(`${base}config.json`, { cache: "no-cache" });
@@ -1686,7 +1703,8 @@ async function fetchWeights(base, config, onProgress) {
   const res = await fetch(url);
   if (!res.ok)
     throw new Error(`downloading ${url}: HTTP ${res.status}`);
-  const total = config.bytes || 0;
+  const file = config.files?.["model.safetensors"];
+  const total = config.bytes || file?.bytes || 0;
   const reader = res.body.getReader();
   const parts = [];
   let got = 0;
@@ -1701,6 +1719,11 @@ async function fetchWeights(base, config, onProgress) {
   const blob = new Blob(parts);
   if (total && got !== total)
     throw new Error(`download cut short: ${got} of ${total} bytes`);
+  if (file?.sha256) {
+    const hex = [...new Uint8Array(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer()))].map((b) => b.toString(16).padStart(2, "0")).join("");
+    if (hex !== file.sha256.toLowerCase())
+      throw new Error(`the weights' sha256 is ${hex.slice(0, 12)}…, not the published ${file.sha256.slice(0, 12)}…`);
+  }
   try {
     for (const k of await cache?.keys() ?? [])
       await cache.delete(k);
@@ -1781,10 +1804,7 @@ var DISMISSED = "nirca-mini-dismissed-step";
 var latest = null;
 async function checkLatest() {
   try {
-    const res = await fetch(latestUrl(), { cache: "no-cache" });
-    if (!res.ok)
-      return;
-    const config = await res.json();
+    const config = await readLatest();
     if (!(Number(config.step) > Number(current?.config.step)))
       return;
     let dismissed = null;
