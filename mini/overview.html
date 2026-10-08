@@ -55,20 +55,12 @@
 
   <!--ABOUT-->
   <ul class="headline">
-    <li><strong>Trained from scratch, ternary.</strong> Each weight in its linear layers takes one of three values: minus one, zero or plus one. It
-      was trained with quantization-aware training from step 14,655 on, so the weights were learned
-      ternary rather than squeezed down after training.</li>
-    <li><strong>Small.</strong> About <span data-fill="params">109 million</span> parameters,
-      <span data-fill="mb">33</span> MB to download, small enough to run on a phone's GPU.</li>
+    <li><strong>Small:</strong> about <span data-fill="params">109 million</span> parameters.</li>
+    <li><strong>Trained from scratch with quantization-aware training, in ternary:</strong> from step 14,655 of
+      <span data-fill="step">62,895</span>, so for <span data-fill="ternaryShare">98%</span> of its
+      <span data-fill="tokens">1,217,308,397</span> tokens; the ternary weights were learned in training, not
+      quantized after it.</li>
   </ul>
-  <h2>What it is</h2>
-  <p>Nirca is a project that trains small language models from scratch on a Mac, to find out how far
-    careful training can take a small model. Nirca Mini is its smallest chat model, made to be a friendly
-    companion that helps people think things through. It is an experiment, not a product: it is small,
-    it makes mistakes, and it says odd things.</p>
-  <p>The chat page runs the model on your own GPU with WebGPU. Nothing you type leaves the page. Its
-    replies match Nirca's own reference code for the same model, step for step.</p>
-
   <h2>Where it comes from</h2>
   <p>Nirca was inspired by <a href="https://github.com/volotat/mini-AGI">mini-AGI</a>, and its architecture is
     deliberately derived from it: Nirca began as a port of mini-AGI to MLX.</p>
@@ -79,6 +71,14 @@
       format before that is not recorded); tuned on chats; chat format: ChatML instead of mini-AGI's own tags; a fixed
       <span data-fill="experts">32</span>-expert pool where mini-AGI grows and prunes its own.</li>
   </ul>
+
+  <h2>What it is</h2>
+  <p>Nirca is a project that trains small language models from scratch on a Mac, to find out how far
+    careful training can take a small model. Nirca Mini is its smallest chat model, made to be a friendly
+    companion that helps people think things through. It is an experiment, not a product: it is small,
+    it makes mistakes, and it says odd things.</p>
+  <p>The chat page runs the model on your own GPU with WebGPU. Nothing you type leaves the page. Its
+    replies match Nirca's own reference code for the same model, step for step.</p>
 
   <h2>The model</h2>
   <div class="panel">
@@ -97,7 +97,7 @@
 
   <h2>How it came to be</h2>
   <p>On 2026-10-07, Nirca Mini began as a cut-down copy of nirca-0, a larger Nirca model, and has
-    trained since on short chats. The copy on this page is step <span data-fill="step">62,377</span>; the page
+    trained since on short chats. The copy on this page is step <span data-fill="step">62,895</span>; the page
     loads newer checkpoints as they are published.</p>
 
   <h2>How it is trained</h2>
@@ -454,6 +454,7 @@ async function headerAt(url) {
   return JSON.parse(new TextDecoder().decode(await part(8, 8 + n - 1)));
 }
 var num = (n) => Number(n).toLocaleString("en-US");
+var TERNARY_FROM_TOKENS = 29497375;
 function facts(config, weights) {
   const { params, group } = weights ?? {};
   const cfg = config.cfg ?? {};
@@ -469,6 +470,11 @@ function facts(config, weights) {
   };
   if (group)
     f.group = num(group);
+  if (config.tokens)
+    Object.assign(f, {
+      tokens: num(config.tokens),
+      ternaryShare: `${Math.round(100 * (1 - TERNARY_FROM_TOKENS / config.tokens))}%`
+    });
   if (params)
     Object.assign(f, { params: `${Math.round(params / 1e6)} million`, paramsM: `${Math.round(params / 1e6)}M` });
   return f;

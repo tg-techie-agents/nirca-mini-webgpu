@@ -133,6 +133,8 @@ SOFTWARE.
   .msg.bot.writing .text::after { content: "▍"; color: var(--accent); }
   .empty { color: var(--muted); text-align: center; margin: auto 0; font-size: 14px; }
   #composer { flex: none; }
+  .foot { flex: none; margin: -4px 0 0; text-align: center; font-size: 12px; color: var(--muted); }
+  html.typing .foot { display: none; }
   /* with the keyboard up the space is the conversation's: the intro line and a loaded model's panel step aside */
   html.typing header p, html.typing.loaded #loader { display: none; }
   form { display: flex; gap: 8px; align-items: flex-end; }
@@ -203,7 +205,7 @@ SOFTWARE.
       <button id="chatsButton" type="button" aria-expanded="false" aria-controls="chats">Chats</button>
       <button id="newChat" type="button" disabled>New chat</button>
     </div>
-    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v31, built 2026-10-08 from da8d921">site v31</span></p>
+    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v32, built 2026-10-08 from 77af1f6">site v32</span></p>
     <nav aria-label="Pages">
       <a href="#chat" data-tab="chat" aria-current="page">Chat</a>
       <a href="#about" data-tab="about">About</a>
@@ -239,7 +241,7 @@ SOFTWARE.
       </form>
       <div class="tools">
         <details id="settings">
-          <summary>Settings</summary>
+          <summary>Settings (<span id="sumExperts"></span> Active Experts ⋅ <span id="sumPasses"></span> Recurrence passes)</summary>
           <div class="settings">
             <label class="small">Experts per byte <input id="topK" type="number" inputmode="numeric" min="1" max="32" value="32"></label>
             <label class="small">Recurrence passes, least <input id="least" type="number" inputmode="numeric" min="1" max="24" value="1"></label>
@@ -256,24 +258,17 @@ SOFTWARE.
         <span class="status grow" id="genStatus"></span>
       </div>
     </section>
+    <p class="foot">The model runs in your own browser using WebGPU; nothing you type leaves this page</p>
   </main>
 
   <main id="aboutTab" class="read" hidden>
   <ul class="headline">
-    <li><strong>Trained from scratch, ternary.</strong> Each weight in its linear layers takes one of three values: minus one, zero or plus one. It
-      was trained with quantization-aware training from step 14,655 on, so the weights were learned
-      ternary rather than squeezed down after training.</li>
-    <li><strong>Small.</strong> About <span data-fill="params">109 million</span> parameters,
-      <span data-fill="mb">33</span> MB to download, small enough to run on a phone's GPU.</li>
+    <li><strong>Small:</strong> about <span data-fill="params">109 million</span> parameters.</li>
+    <li><strong>Trained from scratch with quantization-aware training, in ternary:</strong> from step 14,655 of
+      <span data-fill="step">62,895</span>, so for <span data-fill="ternaryShare">98%</span> of its
+      <span data-fill="tokens">1,217,308,397</span> tokens; the ternary weights were learned in training, not
+      quantized after it.</li>
   </ul>
-  <h2>What it is</h2>
-  <p>Nirca is a project that trains small language models from scratch on a Mac, to find out how far
-    careful training can take a small model. Nirca Mini is its smallest chat model, made to be a friendly
-    companion that helps people think things through. It is an experiment, not a product: it is small,
-    it makes mistakes, and it says odd things.</p>
-  <p>The chat page runs the model on your own GPU with WebGPU. Nothing you type leaves the page. Its
-    replies match Nirca's own reference code for the same model, step for step.</p>
-
   <h2>Where it comes from</h2>
   <p>Nirca was inspired by <a href="https://github.com/volotat/mini-AGI">mini-AGI</a>, and its architecture is
     deliberately derived from it: Nirca began as a port of mini-AGI to MLX.</p>
@@ -284,6 +279,14 @@ SOFTWARE.
       format before that is not recorded); tuned on chats; chat format: ChatML instead of mini-AGI's own tags; a fixed
       <span data-fill="experts">32</span>-expert pool where mini-AGI grows and prunes its own.</li>
   </ul>
+
+  <h2>What it is</h2>
+  <p>Nirca is a project that trains small language models from scratch on a Mac, to find out how far
+    careful training can take a small model. Nirca Mini is its smallest chat model, made to be a friendly
+    companion that helps people think things through. It is an experiment, not a product: it is small,
+    it makes mistakes, and it says odd things.</p>
+  <p>The chat page runs the model on your own GPU with WebGPU. Nothing you type leaves the page. Its
+    replies match Nirca's own reference code for the same model, step for step.</p>
 
   <h2>The model</h2>
   <div class="panel">
@@ -302,7 +305,7 @@ SOFTWARE.
 
   <h2>How it came to be</h2>
   <p>On 2026-10-07, Nirca Mini began as a cut-down copy of nirca-0, a larger Nirca model, and has
-    trained since on short chats. The copy on this page is step <span data-fill="step">62,377</span>; the page
+    trained since on short chats. The copy on this page is step <span data-fill="step">62,895</span>; the page
     loads newer checkpoints as they are published.</p>
 
   <h2>How it is trained</h2>
@@ -2323,6 +2326,7 @@ function headerOf(bytes) {
   return JSON.parse(new TextDecoder().decode(bytes.subarray(8, 8 + n)));
 }
 var num = (n) => Number(n).toLocaleString("en-US");
+var TERNARY_FROM_TOKENS = 29497375;
 function facts(config, weights) {
   const { params, group } = weights ?? {};
   const cfg = config.cfg ?? {};
@@ -2338,6 +2342,11 @@ function facts(config, weights) {
   };
   if (group)
     f.group = num(group);
+  if (config.tokens)
+    Object.assign(f, {
+      tokens: num(config.tokens),
+      ternaryShare: `${Math.round(100 * (1 - TERNARY_FROM_TOKENS / config.tokens))}%`
+    });
   if (params)
     Object.assign(f, { params: `${Math.round(params / 1e6)} million`, paramsM: `${Math.round(params / 1e6)}M` });
   return f;
@@ -2701,7 +2710,14 @@ function saveChat(changed = true) {
   store(CHATS, { open: openId, chats });
   renderChats();
 }
-var saveSettings = () => store(SETTINGS, Object.fromEntries(Object.keys(DEFAULTS).map((id) => [id, $(id).value])));
+function showSettings() {
+  $("sumExperts").textContent = $("topK").value;
+  $("sumPasses").textContent = `${$("least").value}-${$("most").value}`;
+}
+var saveSettings = () => {
+  store(SETTINGS, Object.fromEntries(Object.keys(DEFAULTS).map((id) => [id, $(id).value])));
+  showSettings();
+};
 var when = (t) => new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 function renderChats() {
   const list = $("chatList");
@@ -2761,6 +2777,7 @@ function restore() {
       if (s[id] !== undefined)
         $(id).value = s[id];
   }
+  showSettings();
   loadChats();
   showChat(openId);
 }
@@ -2874,8 +2891,10 @@ $("resetSettings").addEventListener("click", () => {
     $(id).value = v;
   saveSettings();
 });
-for (const id of Object.keys(DEFAULTS))
+for (const id of Object.keys(DEFAULTS)) {
   $(id).addEventListener("change", saveSettings);
+  $(id).addEventListener("input", showSettings);
+}
 $("newChat").addEventListener("click", () => {
   showChat(null);
   $("input").focus();

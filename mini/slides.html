@@ -661,6 +661,7 @@ async function headerAt(url) {
   return JSON.parse(new TextDecoder().decode(await part(8, 8 + n - 1)));
 }
 var num = (n) => Number(n).toLocaleString("en-US");
+var TERNARY_FROM_TOKENS = 29497375;
 function facts(config, weights) {
   const { params, group } = weights ?? {};
   const cfg = config.cfg ?? {};
@@ -676,6 +677,11 @@ function facts(config, weights) {
   };
   if (group)
     f.group = num(group);
+  if (config.tokens)
+    Object.assign(f, {
+      tokens: num(config.tokens),
+      ternaryShare: `${Math.round(100 * (1 - TERNARY_FROM_TOKENS / config.tokens))}%`
+    });
   if (params)
     Object.assign(f, { params: `${Math.round(params / 1e6)} million`, paramsM: `${Math.round(params / 1e6)}M` });
   return f;
