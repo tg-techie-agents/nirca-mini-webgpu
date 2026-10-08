@@ -109,6 +109,8 @@ SOFTWARE.
   .error { color: var(--warn); white-space: pre-wrap; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
   .grow { flex: 1; min-width: 0; }
+  /* the generation status wraps onto its own line, never squeezed beside the Settings switch */
+  #genStatus { flex: 1 1 100%; }
 
   /* The chat tab is an app shell exactly as tall as what is seen: the header, the
      conversation (which scrolls), and the composer, so the keyboard never pushes
@@ -206,7 +208,7 @@ SOFTWARE.
       <button id="chatsButton" type="button" aria-expanded="false" aria-controls="chats">Chats</button>
       <button id="newChat" type="button" disabled>New chat</button>
     </div>
-    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v34, built 2026-10-08 from 8b1cd80">site v34</span></p>
+    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v36, built 2026-10-08 from b07d0c9">site v36</span></p>
     <nav aria-label="Pages">
       <a href="#chat" data-tab="chat" aria-current="page">Chat</a>
       <a href="#about" data-tab="about">About</a>
@@ -228,7 +230,6 @@ SOFTWARE.
       </div>
       <div class="bar" id="bar" hidden><div></div></div>
       <div class="status" id="loadStatus"></div>
-      <label class="small" id="modelRow">Model <select id="model" disabled></select></label>
     </section>
 
     <section id="chat" aria-live="polite">
@@ -245,6 +246,7 @@ SOFTWARE.
         <details id="settings">
           <summary>Settings (<span id="sumExperts"></span> Active Experts ⋅ <span id="sumPasses"></span> Recurrence passes)</summary>
           <div class="settings">
+            <label class="small">Model <select id="model" disabled></select></label>
             <label class="small">Experts per byte <input id="topK" type="number" inputmode="numeric" min="1" max="32" value="32"></label>
             <label class="small">Recurrence passes, least <input id="least" type="number" inputmode="numeric" min="1" max="24" value="1"></label>
             <label class="small">most <input id="most" type="number" inputmode="numeric" min="1" max="24" value="24"></label>
@@ -309,12 +311,12 @@ SOFTWARE.
 
   <h2>How it came to be</h2>
   <p>On 2026-10-07, Nirca Mini began as a cut-down copy of nirca-0, a larger Nirca model, and has
-    trained since on short chats. The copy on this page is step <span data-fill="step">68,155</span>; the page
+    trained since on short chats. The copy on this page is step <span data-fill="step">68,618</span>; the page
     loads newer checkpoints as they are published.</p>
 
   <h2>How it is trained</h2>
-  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">68,155</span>, so for
-    <span data-fill="ternaryShare">98%</span> of its <span data-fill="tokens">1,701,013,761</span> tokens</p>
+  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">68,618</span>, so for
+    <span data-fill="ternaryShare">98%</span> of its <span data-fill="tokens">1,743,512,122</span> tokens</p>
   <div class="diagram"><svg viewBox="0 0 720 300" role="img" aria-labelledby="dtitle">
     <title id="dtitle">Training: open chat datasets and synthetic and private chats are prepared (anonymised,
       put in ChatML, cut to fit, swept for leaks) for the trainer, which writes checkpoints; checkpoints are
@@ -2541,8 +2543,8 @@ var MODEL_LABELS = { latest: "Latest, follows the published model", "62895": "Fi
 function showModels() {
   const sel = $("model");
   if (!sel.options.length) {
-    for (const [key, text] of Object.entries(MODEL_LABELS))
-      sel.add(new Option(text, key));
+    for (const key of ["latest", ...Object.keys(PINNED)])
+      sel.add(new Option(MODEL_LABELS[key], key));
     for (const key of Object.keys(PINNED))
       readPinned(key).then(([, c]) => {
         sel.querySelector(`option[value="${key}"]`).textContent = `${MODEL_LABELS[key]} (step ${Number(c.step).toLocaleString("en-US")})`;
@@ -3014,9 +3016,13 @@ function fitSeen() {
 }
 vv?.addEventListener("resize", fitSeen);
 vv?.addEventListener("scroll", fitSeen);
-$("input").addEventListener("focus", () => setTimeout(fitSeen, 50));
+$("input").addEventListener("focus", () => {
+  for (const t of [50, 300, 700])
+    setTimeout(fitSeen, t);
+});
 $("input").addEventListener("blur", () => setTimeout(fitSeen, 50));
 restore();
+showModels();
 showTab();
 fitSeen();
 load();
