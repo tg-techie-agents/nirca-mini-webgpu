@@ -200,7 +200,7 @@ SOFTWARE.
       <button id="chatsButton" type="button" aria-expanded="false" aria-controls="chats">Chats</button>
       <button id="newChat" type="button" disabled>New chat</button>
     </div>
-    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v27, built 2026-10-08 from e3e6942">site v27</span></p>
+    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v28, built 2026-10-08 from f34caf0">site v28</span></p>
     <nav aria-label="Pages">
       <a href="#chat" data-tab="chat" aria-current="page">Chat</a>
       <a href="#about" data-tab="about">About</a>
@@ -631,6 +631,7 @@ var __export = (target, all) => {
 // web/kernels.js
 var exports_kernels = {};
 __export(exports_kernels, {
+  TRACE: () => TRACE,
   ROUTER: () => ROUTER,
   ROUTE: () => ROUTE,
   ROPE_KV: () => ROPE_KV,
@@ -638,6 +639,7 @@ __export(exports_kernels, {
   QMM2: () => QMM2,
   QMM1: () => QMM1,
   QMM: () => QMM,
+  PICK: () => PICK,
   INIT: () => INIT,
   GROUP: () => GROUP,
   GCLEAR: () => GCLEAR,
@@ -1467,6 +1469,43 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
     ep[p * 512u + o] = acc[k] * bitcast<f32>(route[r * 96u + 32u + j]);
   }
 }`;
+var TRACE = HEADER + `
+@group(0) @binding(0) var<storage, read> hist: array<u32>;
+@group(0) @binding(1) var<storage, read> tr: array<f32>;      // decay^0..63, then strength
+@group(0) @binding(2) var<storage, read_write> pen: array<f32>;
+@compute @workgroup_size(64)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let i = gid.x;
+  if (i >= 265u) { return; }
+  let cnt = hist[0]; let n = min(64u, cnt);
+  var t = 0.0;
+  for (var k = 0u; k < n; k++) {
+    if (hist[2u + (cnt - n + k) % 64u] == i) { t += tr[n - 1u - k]; }
+  }
+  pen[i] = tr[64] * t;
+}`;
+var PICK = HEADER + `
+@group(0) @binding(0) var<storage, read> logits: array<f32>;
+@group(0) @binding(1) var<storage, read> pen: array<f32>;
+@group(0) @binding(2) var<storage, read_write> hist: array<u32>;
+@group(0) @binding(3) var<storage, read_write> ids: array<u32>;
+@group(0) @binding(4) var<storage, read_write> out: array<u32>;   // ids, then passes, from 64
+@group(0) @binding(5) var<storage, read> st: array<u32>;
+@compute @workgroup_size(1)
+fn main() {
+  var best = 0u; var bv = logits[0] - pen[0];
+  for (var i = 1u; i < 265u; i++) {
+    let v = logits[i] - pen[i];
+    if (v > bv) { best = i; bv = v; }
+  }
+  let cnt = hist[0];
+  let k = cnt - hist[1];
+  out[k] = best;
+  out[64u + k] = st[STEPS];
+  hist[2u + cnt % 64u] = best;
+  hist[0] = cnt + 1u;
+  ids[0] = best;
+}`;
 
 // web/engine.js
 var D = 512;
@@ -1644,8 +1683,21 @@ class Engine {
     this.g = dev.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.read = dev.createBuffer({ size: 272 * 4 + 16, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
     this.cf = shape.cf;
+    const COPY = GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
+    this.d = {
+      hist: buf(66 * 4),
+      tr: buf(65 * 4),
+      pen: buf(272 * 4),
+      out: buf(128 * 4),
+      gs: dev.createBuffer({ size: 64 * 16, usage: COPY }),
+      reads: []
+    };
     this.ops = this.#build(false);
     this.ops1 = this.#build(true);
+    this.pickOps = [
+      this.#op(TRACE, [this.d.hist, this.d.tr, this.d.pen], () => [5]),
+      this.#op(PICK, [this.b.logits, this.d.pen, this.d.hist, this.b.ids, this.d.out, this.b.st], () => [1])
+    ];
   }
   #pipe(code) {
     this.pipes ??= new Map;
@@ -1804,6 +1856,62 @@ class Engine {
     this.offset += rows;
     return each;
   }
+  decodeStart(prev, next, trace) {
+    const n = Math.min(64, prev.length + 1), all = [...prev, next], cnt = all.length;
+    const hist = new Uint32Array(66);
+    hist[0] = cnt;
+    for (let k = 0;k < n; k++)
+      hist[2 + (cnt - n + k) % 64] = all[cnt - n + k];
+    const q = this.device.queue;
+    q.writeBuffer(this.d.hist, 0, hist);
+    const tr = new Float32Array(65);
+    for (let k = 0;k < 64; k++)
+      tr[k] = Math.fround(trace.decay ** k);
+    tr[64] = Math.fround(trace.strength);
+    if (trace.window !== 64)
+      throw new Error("the GPU pick keeps a trace of 64 ids");
+    q.writeBuffer(this.d.tr, 0, tr);
+    q.writeBuffer(this.b.ids, 0, new Uint32Array([next]));
+    this.picked = cnt;
+  }
+  canDecode(n) {
+    return this.offset + n <= this.block && n <= 64;
+  }
+  decodeBatch(n) {
+    if (!this.canDecode(n))
+      throw new Error(`no room for ${n} more bytes in the caches`);
+    if (!(this.topK >= 1 && this.topK <= 32) || !(this.least >= 1 && this.least <= this.most && this.most <= this.maxSteps)) {
+      throw new Error("settings out of range");
+    }
+    const q = this.device.queue, d = this.d;
+    const gs = new Uint32Array(n * 4);
+    for (let i = 0;i < n; i++)
+      gs.set([1, this.offset + i, this.topK, this.least | this.most << 16], i * 4);
+    q.writeBuffer(d.gs, 0, gs);
+    q.writeBuffer(d.hist, 4, new Uint32Array([this.picked]));
+    const enc = this.device.createCommandEncoder();
+    for (let i = 0;i < n; i++) {
+      enc.copyBufferToBuffer(d.gs, i * 16, this.g, 0, 16);
+      const pass = enc.beginComputePass();
+      for (const op of [...this.ops1, ...this.pickOps]) {
+        pass.setPipeline(op.pipe);
+        pass.setBindGroup(0, op.bind);
+        pass.dispatchWorkgroups(...op.groups(1));
+      }
+      pass.end();
+    }
+    const read = d.reads.pop() ?? this.device.createBuffer({ size: 128 * 4, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    enc.copyBufferToBuffer(d.out, 0, read, 0, 128 * 4);
+    q.submit([enc.finish()]);
+    this.offset += n;
+    this.picked += n;
+    return read.mapAsync(GPUMapMode.READ).then(() => {
+      const u = new Uint32Array(read.getMappedRange().slice(0));
+      read.unmap();
+      d.reads.push(read);
+      return { ids: Array.from(u.subarray(0, n)), passes: Array.from(u.subarray(64, 64 + n)) };
+    });
+  }
   async forward(ids) {
     const rows = ids.length;
     if (rows < 1 || rows > MAX_ROWS)
@@ -1922,8 +2030,9 @@ ${text}${IM_END}
 // web/decode.js
 var PREFILL_CHUNK = 512;
 var SHOWN_START = 3;
-var TRACE = { strength: 2.5, decay: 0.88, window: 64 };
-function adjusted(logits, prev, trace = TRACE) {
+var TRACE2 = { strength: 2.5, decay: 0.88, window: 64 };
+var BATCH = 16;
+function adjusted(logits, prev, trace = TRACE2) {
   const z = Float32Array.from(logits);
   if (!trace.strength || !prev.length)
     return z;
@@ -1970,28 +2079,85 @@ async function* generate(engine, prompt, maxNew, end, { record = false, stop } =
   const wrote = [];
   const spelled = encode(end).length > 1;
   const held = [];
-  for (let n = 0;n < maxNew; n++) {
+  function* take(nxt2, passes2) {
+    wrote.push(nxt2);
+    if (endsTurn(wrote, end))
+      return true;
+    if (spelled) {
+      held.push({ id: nxt2, passes: passes2 });
+      while (held.length && !end.startsWith(decode(held.map((w) => w.id))))
+        yield held.shift();
+    } else {
+      yield { id: nxt2, passes: passes2 };
+    }
+    out.push(nxt2);
+    return false;
+  }
+  let n = 0;
+  let nxt = argmax(adjusted(r.logits, out)), passes = r.passes;
+  if (!record && engine.decodeBatch && maxNew > 1) {
     if (stop?.()) {
       yield { ended: "stopped" };
       return;
     }
-    const nxt = argmax(adjusted(r.logits, out));
-    wrote.push(nxt);
-    if (endsTurn(wrote, end)) {
+    if (yield* take(nxt, passes)) {
       yield { ended: "end" };
       return;
     }
-    if (spelled) {
-      held.push({ id: nxt, passes: r.passes });
-      while (held.length && !end.startsWith(decode(held.map((w) => w.id))))
-        yield held.shift();
-    } else {
-      yield { id: nxt, passes: r.passes };
+    n++;
+    engine.decodeStart(out.slice(0, -1), nxt, TRACE2);
+    const size = () => Math.min(BATCH, maxNew - n - queued);
+    let queued = 0;
+    const queue = [];
+    const more = () => {
+      const k = size();
+      if (k > 0 && engine.canDecode(k)) {
+        queue.push(engine.decodeBatch(k));
+        queued += k;
+      }
+    };
+    more();
+    more();
+    while (queue.length) {
+      const batch = await queue.shift();
+      queued -= batch.ids.length;
+      for (let i = 0;i < batch.ids.length; i++) {
+        if (stop?.()) {
+          yield { ended: "stopped" };
+          return;
+        }
+        if (yield* take(batch.ids[i], batch.passes[i])) {
+          yield { ended: "end" };
+          return;
+        }
+        n++;
+      }
+      more();
     }
-    out.push(nxt);
+    if (n >= maxNew) {
+      if (new TextEncoder().encode(decode(held.map((w) => w.id))).length < SHOWN_START)
+        yield* held;
+      yield { ended: "cap" };
+      return;
+    }
+    r = await forward([out.at(-1)]);
+    nxt = argmax(adjusted(r.logits, out));
+    passes = r.passes;
+  }
+  for (;n < maxNew; n++) {
+    if (stop?.()) {
+      yield { ended: "stopped" };
+      return;
+    }
+    if (yield* take(nxt, passes)) {
+      yield { ended: "end" };
+      return;
+    }
     r = await forward([nxt]);
     if (r.step)
       yield { step: r.step };
+    nxt = argmax(adjusted(r.logits, out));
+    passes = r.passes;
   }
   if (new TextEncoder().encode(decode(held.map((w) => w.id))).length < SHOWN_START)
     yield* held;
