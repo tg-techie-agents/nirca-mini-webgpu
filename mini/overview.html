@@ -61,16 +61,19 @@
     replies match Nirca's own reference code for the same model, step for step.</p>
 
   <h2>Where it comes from</h2>
-  <p>Nirca was inspired by <a href="https://github.com/volotat/mini-AGI">mini-AGI</a>, an open project: a byte-level
-    language model that trains from scratch on one modest GPU and keeps learning from what it reads. Nirca began as
-    a port of mini-AGI to MLX, Apple's machine-learning framework, and adapts its fundamentals.</p>
+  <p>Nirca's architecture is deliberately derived from <a href="https://github.com/volotat/mini-AGI">mini-AGI</a>, an
+    open project that inspired it: a byte-level language model that trains from scratch on one modest GPU and keeps
+    learning from what it reads. Nirca began as a port of mini-AGI to MLX, Apple's machine-learning framework, and
+    adapts its fundamentals.</p>
   <ul>
     <li><strong>Kept:</strong> it reads and writes bytes, with no tokenizer; one block refines a hidden state pass
       after pass (latent recurrence); every pass routes into one shared pool of experts; and a halting head decides
       when to stop. Its first pretraining text was mini-AGI's corpus.</li>
-    <li><strong>Changed:</strong> the weights are ternary (−1, 0 or +1), trained that way from the first step; it
-      is tuned on chats, written in ChatML; and its pool is a fixed <span data-fill="experts">32</span> experts,
-      where mini-AGI grows and prunes its own.</li>
+    <li><strong>Changed:</strong> the weights are ternary (−1, 0 or +1), trained that way (quantization-aware
+      training) from step 14,655 (29,497,375 tokens) on; the steps before it record no weight format. It is tuned on
+      chats, with the chat format ChatML instead of mini-AGI's own <code>&lt;user&gt;</code>/<code>&lt;bot&gt;</code>
+      tags. And its pool is a fixed <span data-fill="experts">32</span> experts, where mini-AGI grows and prunes its
+      own.</li>
   </ul>
 
   <h2>The model</h2>
@@ -157,7 +160,7 @@
     <li><strong>Swept for leaks.</strong> Chats that share text with the held-out test sets are dropped, by
       their content rather than by file, and a set whose training and test parts overlap is refused.</li>
     <li><strong>Trained.</strong> The model learns to predict the next byte, counting its mistakes only on Nirca
-      Mini's own turns, with its weights ternary from the first step.</li>
+      Mini's own turns, with its weights ternary (since step 14,655 of its lineage).</li>
     <li><strong>Scored and published.</strong> Each checkpoint is scored on held-out chats. A program publishes it,
       and this page loads the newest.</li>
   </ol>
