@@ -85,10 +85,14 @@ SOFTWARE.
   /* inputs at 16px: iOS zooms the page into any smaller field it focuses */
   input, textarea, button { font: inherit; font-size: 16px; }
   a { color: var(--accent); }
-  .page { max-width: 760px; margin: 0 auto; padding: 0 16px; }
-  header { padding: 14px 0 0; }
+  /* viewport-fit=cover puts the page under the notch and home indicator, so every edge pads by its inset */
+  .page { max-width: 760px; margin: 0 auto;
+    padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left)); }
+  header { padding: max(14px, env(safe-area-inset-top)) 0 0; }
   header h1 { margin: 0; font-size: 19px; letter-spacing: -0.01em; }
   header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+  .titlebar { display: flex; gap: 12px; align-items: flex-start; }
+  .titlebar h1 { flex: 1; min-width: 0; }
   nav { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-top: 10px; overflow-x: auto; }
   nav a { padding: 8px 12px; text-decoration: none; color: var(--muted); border-bottom: 2px solid transparent;
     white-space: nowrap; font-size: 15px; }
@@ -110,7 +114,14 @@ SOFTWARE.
      the latest messages or the message box out of sight. */
   body.chat { height: var(--seen); overflow: hidden; }
   body.chat .page { height: 100%; display: flex; flex-direction: column; }
-  #chatTab { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 10px 0 12px; }
+  /* Browsers put different things along the bottom: a toolbar, a floating button (Safari's "…" sits in
+     the bottom-right corner, above the home indicator), or nothing. The shell clears the home indicator
+     by its inset, and the composer keeps the bottom corners free of anything to tap: its last row is
+     only the Settings switch, and New chat sits by the title. */
+  #chatTab { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px;
+    padding: 10px 0 calc(12px + env(safe-area-inset-bottom)); }
+  /* with the keyboard up the inset is under the keyboard (Safari still reports it): drop it */
+  html.typing #chatTab { padding-bottom: 8px; }
   #loader { flex: none; }
   #chat { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 12px;
     overscroll-behavior: contain; }
@@ -134,7 +145,8 @@ SOFTWARE.
   label.small input { width: 64px; color: var(--ink); background: var(--panel);
     border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
   .hint { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 12px; }
-  #newChat { margin-left: auto; padding: 5px 12px; font-size: 14px; }
+  #newChat { padding: 4px 10px; font-size: 14px; white-space: nowrap; flex: none; }
+  body:not(.chat) #newChat { display: none; }
 
   /* the reading tabs */
   .read { padding: 8px 0 40px; line-height: 1.6; }
@@ -158,7 +170,8 @@ SOFTWARE.
   .read code { font: 13px ui-monospace, Menlo, monospace; background: var(--soft); padding: 1px 4px; border-radius: 4px; }
   @media (max-width: 520px) { .read dl { grid-template-columns: 1fr; } .read dt { margin-top: 6px; } }
 
-  .toast { position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  /* the toast comes in at the top: the bottom belongs to the composer and whatever the browser puts there */
+  .toast { position: fixed; left: 50%; top: calc(12px + env(safe-area-inset-top)); transform: translateX(-50%);
     width: max-content; max-width: calc(100% - 32px); display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
     background: var(--panel); border: 1px solid var(--accent); border-radius: 12px; padding: 10px 14px;
     box-shadow: 0 6px 24px rgba(0,0,0,0.15); font-size: 14px; z-index: 2; }
@@ -168,7 +181,10 @@ SOFTWARE.
 <body class="chat">
 <div class="page">
   <header>
-    <h1>Nirca Mini, in your browser</h1>
+    <div class="titlebar">
+      <h1>Nirca Mini, in your browser</h1>
+      <button id="newChat" type="button" disabled>New chat</button>
+    </div>
     <p id="about">109M parameters, ternary weights, 32 experts with adaptive recurrence, on your own GPU.</p>
     <nav aria-label="Pages">
       <a href="#chat" data-tab="chat" aria-current="page">Chat</a>
@@ -215,7 +231,6 @@ SOFTWARE.
           </div>
         </details>
         <span class="status grow" id="genStatus"></span>
-        <button id="newChat" type="button" disabled>New chat</button>
       </div>
     </section>
   </main>
