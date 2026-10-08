@@ -65,13 +65,13 @@
     <dl>
       <dt>Size</dt><dd>About <span data-fill="params">109 million</span> weights, a <span data-fill="mb">33</span> MB download.</dd>
       <dt>Text</dt><dd>Byte-level: it reads and writes one byte at a time, with no tokenizer.</dd>
-      <dt>Weights</dt><dd>Ternary: each weight is −1, 0 or +1, with a scale per block of weights.</dd>
+      <dt>Weights</dt><dd>Ternary: each weight is −1, 0 or +1, with a scale per block of <span data-fill="group">128</span>.</dd>
       <dt>Experts</dt><dd>A mixture of experts: <span data-fill="experts">32</span> experts, of which each byte uses
         <span data-fill="topk">8</span>, as trained.</dd>
       <dt>Depth</dt><dd><span data-fill="prelude">2</span> ordinary layers, then one looped block that runs up to
         <span data-fill="passes">24</span> times per byte. The model decides for itself when to stop (adaptive
         halting), so harder bytes get more passes.</dd>
-      <dt>Context</dt><dd><span data-fill="context">2,048</span> bytes, roughly as many characters of English.</dd>
+      <dt>Context</dt><dd><span data-fill="context">2,048</span> bytes, about <span data-fill="chars">2,000</span> characters of English.</dd>
     </dl>
   </div>
 
@@ -132,6 +132,15 @@
   </ul>
   <p>Every set is swept for text shared with the held-out test sets before anything trains on it. Which
     sets, and in what shares, changes from checkpoint to checkpoint.</p>
+  <div data-dated="2026-10-07">
+  <p>The first checkpoint published here, step 62,377 (2026-10-07), was trained on:</p>
+  <ul>
+    <li><strong>SmolTalk-2</strong>: about 460,000 conversations of at most 2,048 bytes. The leak sweep had dropped
+      about 6,500 more that shared text with held-out evaluation sets.</li>
+    <li><strong>About 1,000 synthetic chats</strong> written by two open models, Gemma 4 31B and Qwen 3.8 27B, under
+      earlier drafts of the charter. These made up about 7% of what the model read in that stretch of training.</li>
+  </ul>
+  </div>
 
   <h2>The system</h2>
   <div data-dated="2026-10-07">
@@ -373,6 +382,17 @@ Reply with your next message in the conversation, and nothing else.
 // web/facts.js
 var PUBLISHED_WEIGHTS = "https://tg-techie-agents.github.io/nirca-mini-webgpu/weights/";
 var LATEST_MANIFEST = "https://huggingface.co/nirca/nirca-mini/resolve/main/latest.json";
+function weightsOf(header) {
+  let group = null;
+  for (const [key, t] of Object.entries(header)) {
+    const scales = key.endsWith(".codes") && header[key.slice(0, -6) + ".scales"];
+    if (scales) {
+      group = t.shape.at(-1) * 16 / scales.shape.at(-1);
+      break;
+    }
+  }
+  return { params: paramsOf(header), group };
+}
 function paramsOf(header) {
   let n = 0;
   for (const [key, t] of Object.entries(header)) {
@@ -397,7 +417,8 @@ async function headerAt(url) {
   return JSON.parse(new TextDecoder().decode(await part(8, 8 + n - 1)));
 }
 var num = (n) => Number(n).toLocaleString("en-US");
-function facts(config, params) {
+function facts(config, weights) {
+  const { params, group } = weights ?? {};
   const cfg = config.cfg ?? {};
   const f = {
     step: num(config.step),
@@ -406,8 +427,11 @@ function facts(config, params) {
     topk: num(cfg.pool_top_k),
     passes: num(cfg.max_steps),
     prelude: num(cfg.n_prelude),
-    context: num(cfg.block)
+    context: num(cfg.block),
+    chars: num(Math.round((cfg.block ?? 0) / 1000) * 1000)
   };
+  if (group)
+    f.group = num(group);
   if (params)
     Object.assign(f, { params: `${Math.round(params / 1e6)} million`, paramsM: `${Math.round(params / 1e6)}M` });
   return f;
@@ -429,11 +453,11 @@ async function newestFacts() {
       if (!(Number.isInteger(config.step) && config.cfg))
         continue;
       const base = new URL(folder(config), manifest).href.replace(/\/?$/, "/");
-      let params = null;
+      let weights = null;
       try {
-        params = paramsOf(await headerAt(base + "model.safetensors"));
+        weights = weightsOf(await headerAt(base + "model.safetensors"));
       } catch {}
-      return facts(config, params);
+      return facts(config, weights);
     } catch {}
   }
   return null;

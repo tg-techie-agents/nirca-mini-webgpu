@@ -626,6 +626,17 @@ fit(); show(at);
 // web/facts.js
 var PUBLISHED_WEIGHTS = "https://tg-techie-agents.github.io/nirca-mini-webgpu/weights/";
 var LATEST_MANIFEST = "https://huggingface.co/nirca/nirca-mini/resolve/main/latest.json";
+function weightsOf(header) {
+  let group = null;
+  for (const [key, t] of Object.entries(header)) {
+    const scales = key.endsWith(".codes") && header[key.slice(0, -6) + ".scales"];
+    if (scales) {
+      group = t.shape.at(-1) * 16 / scales.shape.at(-1);
+      break;
+    }
+  }
+  return { params: paramsOf(header), group };
+}
 function paramsOf(header) {
   let n = 0;
   for (const [key, t] of Object.entries(header)) {
@@ -650,7 +661,8 @@ async function headerAt(url) {
   return JSON.parse(new TextDecoder().decode(await part(8, 8 + n - 1)));
 }
 var num = (n) => Number(n).toLocaleString("en-US");
-function facts(config, params) {
+function facts(config, weights) {
+  const { params, group } = weights ?? {};
   const cfg = config.cfg ?? {};
   const f = {
     step: num(config.step),
@@ -659,8 +671,11 @@ function facts(config, params) {
     topk: num(cfg.pool_top_k),
     passes: num(cfg.max_steps),
     prelude: num(cfg.n_prelude),
-    context: num(cfg.block)
+    context: num(cfg.block),
+    chars: num(Math.round((cfg.block ?? 0) / 1000) * 1000)
   };
+  if (group)
+    f.group = num(group);
   if (params)
     Object.assign(f, { params: `${Math.round(params / 1e6)} million`, paramsM: `${Math.round(params / 1e6)}M` });
   return f;
@@ -682,11 +697,11 @@ async function newestFacts() {
       if (!(Number.isInteger(config.step) && config.cfg))
         continue;
       const base = new URL(folder(config), manifest).href.replace(/\/?$/, "/");
-      let params = null;
+      let weights = null;
       try {
-        params = paramsOf(await headerAt(base + "model.safetensors"));
+        weights = weightsOf(await headerAt(base + "model.safetensors"));
       } catch {}
-      return facts(config, params);
+      return facts(config, weights);
     } catch {}
   }
   return null;
