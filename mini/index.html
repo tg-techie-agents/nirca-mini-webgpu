@@ -200,7 +200,7 @@ SOFTWARE.
       <button id="chatsButton" type="button" aria-expanded="false" aria-controls="chats">Chats</button>
       <button id="newChat" type="button" disabled>New chat</button>
     </div>
-    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v21, built 2026-10-08 from 8bd2f69">site v21</span></p>
+    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v23, built 2026-10-08 from 27f64d8">site v23</span></p>
     <nav aria-label="Pages">
       <a href="#chat" data-tab="chat" aria-current="page">Chat</a>
       <a href="#about" data-tab="about">About</a>
@@ -599,8 +599,7 @@ Reply with your next message in the conversation, and nothing else.
 
 <div class="toast" id="toast" role="status" hidden>
   <span id="toastText"></span>
-  <button class="primary" id="update" type="button">Update</button>
-  <button id="dismiss" type="button">Dismiss</button>
+  <button id="toastOk" type="button">OK</button>
 </div>
 <script type="module">
 // web/kernels.js
@@ -1910,8 +1909,19 @@ async function load() {
       throw new Error("This browser has no WebGPU, so the model can't run here. Use a recent Chrome, Edge or Safari on a device with a GPU.");
     setLoad("Looking for the model…", 0);
     const explicit = params.has("weights");
-    const rec = explicit ? null : await cachedModel();
-    const [base, config] = rec ? [rec.base, rec.config] : await findWeights();
+    let found = null;
+    if (!explicit) {
+      try {
+        const m = await readLatest();
+        found = [latestBase(m), m];
+      } catch (e) {
+        console.warn("no published manifest:", e);
+      }
+      const rec = found ? null : await cachedModel();
+      if (rec)
+        found = [rec.base, rec.config];
+    }
+    const [base, config] = found ?? await findWeights();
     const t0 = performance.now();
     const { buffer, cached } = await fetchWeights(base, config, progress("Downloading the model"));
     const t1 = performance.now();
@@ -1927,7 +1937,7 @@ async function load() {
     setChatEnabled(true);
     $("input").focus();
     if (!explicit)
-      checkLatest();
+      watchLatest();
   } catch (e) {
     console.error(e);
     $("loadText").textContent = "The model didn't load.";
@@ -1937,57 +1947,67 @@ async function load() {
     $("load").hidden = !navigator.gpu;
   }
 }
-var DISMISSED = "nirca-mini-dismissed-step";
-var latest = null;
+var CHECK_EVERY = 5 * 60 * 1000;
+var sameModel = (a, b) => a?.step === b?.step && (a?.checkpoint ?? null) === (b?.checkpoint ?? null);
+var following = false;
+var followAfterReply = false;
+var toastTimer = 0;
+function watchLatest() {
+  checkLatest();
+  setInterval(checkLatest, CHECK_EVERY);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden)
+      checkLatest();
+  });
+}
 async function checkLatest() {
+  if (following || !current)
+    return;
   try {
     const config = await readLatest();
-    if (!(Number(config.step) > Number(current?.config.step)))
+    if (sameModel(config, current.config))
       return;
-    let dismissed = null;
-    try {
-      dismissed = localStorage.getItem(DISMISSED);
-    } catch {}
-    if (dismissed === String(config.step))
+    if (busy) {
+      followAfterReply = true;
       return;
-    latest = { base: latestBase(config), config };
-    $("toastText").textContent = `A newer Nirca Mini (step ${config.step}) is available.`;
-    $("toast").hidden = false;
+    }
+    await follow({ base: latestBase(config), config });
   } catch (e) {
-    console.warn("could not check for a newer model:", e);
+    console.warn("could not check the published model:", e);
   }
 }
-async function update() {
-  if (!latest || busy)
-    return;
-  $("toast").hidden = true;
+async function follow(next) {
+  following = true;
   busy = true;
   setChatEnabled(false);
-  $("loadText").textContent = "Updating the model…";
+  const was = current.config.step, to = next.config.step;
+  $("loadText").textContent = `Switching to step ${to}, the published model…`;
   try {
-    const { buffer } = await fetchWeights(latest.base, latest.config, progress("Downloading the newer model"));
+    const { buffer } = await fetchWeights(next.base, next.config, progress(`Downloading step ${to}`));
     setLoad("Loading onto the GPU…", 0.95);
     const old = device;
-    [device, engine] = await startEngine(buffer, latest.config);
+    [device, engine] = await startEngine(buffer, next.config);
     old?.destroy();
-    current = latest;
+    current = next;
     $("loadText").textContent = "Model loaded.";
-    setLoad(`Updated to step ${latest.config.step}. Your chat continues with the newer model.`, 1);
+    const news = to > was ? `Now on step ${to}, the newest published model.` : `Step ${was} is no longer the published model; now on step ${to}.`;
+    setLoad(`${news} Your chat continues with it.`, 1);
+    $("toastText").textContent = news;
+    $("toast").hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
+      $("toast").hidden = true;
+    }, 8000);
   } catch (e) {
     console.error(e);
     $("loadText").textContent = "Model loaded.";
-    setLoad(`The update failed (${e.message ?? e}); still using step ${current.config.step}.`, null, true);
+    setLoad(`Switching to step ${to} failed (${e.message ?? e}); still on step ${was}.`, null, true);
   } finally {
     $("bar").hidden = true;
     busy = false;
+    following = false;
     setChatEnabled(!!engine);
   }
-}
-function dismiss() {
-  $("toast").hidden = true;
-  try {
-    localStorage.setItem(DISMISSED, String(latest?.config.step));
-  } catch {}
 }
 function clampInput(id, lo, hi, fallback) {
   const raw = Math.round(Number($(id).value));
@@ -2002,7 +2022,6 @@ function setChatEnabled(on) {
   $("newChat").disabled = !on || busy || !messages.length;
   for (const b of $("chatList").querySelectorAll("button"))
     b.disabled = busy;
-  $("update").disabled = busy;
 }
 function bubble(role, text, meta = "") {
   $("empty").hidden = true;
@@ -2201,11 +2220,16 @@ async function send(text) {
     setChatEnabled(!!engine);
     toEnd();
     $("input").focus();
+    if (followAfterReply) {
+      followAfterReply = false;
+      checkLatest();
+    }
   }
 }
 $("load").addEventListener("click", load);
-$("update").addEventListener("click", update);
-$("dismiss").addEventListener("click", dismiss);
+$("toastOk").addEventListener("click", () => {
+  $("toast").hidden = true;
+});
 $("form").addEventListener("submit", (e) => {
   e.preventDefault();
   const text = $("input").value;
