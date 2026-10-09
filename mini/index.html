@@ -230,7 +230,7 @@ SOFTWARE.
       <a href="#charter" data-tab="charter">Charter</a>
       <a href="slides.html" id="slidesLink" target="_blank" rel="noopener">Slides ↗</a>
       <button id="shareButton" type="button" aria-label="Share" title="Share"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M8 7l4-4 4 4M5 11v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/></svg></button>
-      <span class="ver" data-fill="site" title="site v43, built 2026-10-09 from 6033b84">site v43</span>
+      <span class="ver" data-fill="site" title="site v44, built 2026-10-09 from a1eee2c">site v44</span>
     </nav>
   </header>
 
@@ -329,12 +329,12 @@ SOFTWARE.
 
   <h2>How it came to be</h2>
   <p>On 2026-10-07, Nirca Mini began as a cut-down copy of nirca-0, a larger Nirca model, and has
-    trained since on short chats. The copy on this page is step <span data-fill="step">69,383</span>; the page
+    trained since on short chats. The copy on this page is step <span data-fill="step">70,014</span>; the page
     loads newer checkpoints as they are published.</p>
 
   <h2>How it is trained</h2>
-  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">69,383</span>, so for
-    <span data-fill="ternaryShare">98%</span> of its <span data-fill="tokens">1,813,722,797</span> tokens</p>
+  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">70,014</span>, so for
+    <span data-fill="ternaryShare">98%</span> of its <span data-fill="tokens">1,871,557,097</span> tokens</p>
   <div class="diagram"><svg viewBox="0 0 720 300" role="img" aria-labelledby="dtitle">
     <title id="dtitle">Training: open chat datasets and synthetic and private chats are prepared (anonymised,
       put in ChatML, cut to fit, swept for leaks) for the trainer, which writes checkpoints; checkpoints are
@@ -1843,6 +1843,8 @@ class Engine {
     };
     this.kv = Array.from({ length: SLOTS_PRE + this.maxSteps }, () => ({ k: buf(this.block * D * 4), v: buf(this.block * D * 4) }));
     this.scratch = buf(this.block * D * 4);
+    this.snap = buf(16 * 4);
+    this.kept = null;
     this.g = dev.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.read = dev.createBuffer({ size: 272 * 4 + 16, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
     this.cf = shape.cf;
@@ -1978,12 +1980,41 @@ class Engine {
   }
   reset() {
     this.offset = 0;
+    this.kept = null;
     this.device.queue.writeBuffer(this.b.st, 4, new Uint32Array([0]));
+  }
+  resume(ids) {
+    const k = this.kept;
+    this.kept = null;
+    let n = 0;
+    if (k && k.key === this.#settings()) {
+      const max = Math.min(k.ids.length, Math.floor((ids.length - 1) / MAX_ROWS) * MAX_ROWS);
+      while (n < max && k.ids[n] === ids[n])
+        n++;
+      n = Math.floor(n / MAX_ROWS) * MAX_ROWS;
+    }
+    if (n === 0) {
+      this.reset();
+      return 0;
+    }
+    const enc = this.device.createCommandEncoder();
+    enc.copyBufferToBuffer(this.snap, (n / MAX_ROWS - 1) * 4, this.b.st, 4, 4);
+    this.device.queue.submit([enc.finish()]);
+    this.offset = n;
+    return n;
+  }
+  keep(ids) {
+    const n = Math.floor(ids.length / MAX_ROWS) * MAX_ROWS;
+    this.kept = n && this.offset >= n ? { ids: ids.slice(0, n), key: this.#settings() } : null;
+  }
+  #settings() {
+    return `${this.topK},${this.least},${this.most}`;
   }
   #trim(keep) {
     if (this.offset <= keep)
       return;
     const drop = this.offset - keep;
+    this.kept = null;
     const enc = this.device.createCommandEncoder();
     for (const c of this.kv) {
       for (const buf of [c.k, c.v]) {
@@ -2079,7 +2110,7 @@ class Engine {
       return { ids: Array.from(u.subarray(0, n)), passes: Array.from(u.subarray(64, 64 + n)) };
     });
   }
-  async forward(ids) {
+  async forward(ids, prefill = false) {
     const rows = ids.length;
     if (rows < 1 || rows > MAX_ROWS)
       throw new Error(`a forward reads 1 to ${MAX_ROWS} ids, not ${rows}`);
@@ -2102,6 +2133,9 @@ class Engine {
     pass.end();
     enc.copyBufferToBuffer(this.b.logits, 0, this.read, 0, 265 * 4);
     enc.copyBufferToBuffer(this.b.st, ST.STEPS * 4, this.read, 272 * 4, 4);
+    if (prefill && rows === MAX_ROWS && this.offset % MAX_ROWS === 0) {
+      enc.copyBufferToBuffer(this.b.st, 4, this.snap, this.offset / MAX_ROWS * 4, 4);
+    }
     q.submit([enc.finish()]);
     await this.read.mapAsync(GPUMapMode.READ);
     const m = this.read.getMappedRange();
@@ -2223,25 +2257,31 @@ function argmax(z) {
 function endsTurn(written, end) {
   return decode(written.slice(-(end.length + 1))).endsWith(end);
 }
-async function* generate(engine, prompt, maxNew, end, { record = false, stop } = {}) {
+async function* generate(engine, prompt, maxNew, end, { record = false, stop, reuse = false } = {}) {
   const ids = prompt.slice(-engine.block);
   if (!ids.length)
     ids.push(10);
-  engine.reset();
-  const forward = async (chunk) => {
-    const r2 = await engine.forward(chunk);
+  let from = 0;
+  if (reuse)
+    from = engine.resume(ids);
+  else
+    engine.reset();
+  const forward = async (chunk, prefill = false) => {
+    const r2 = await engine.forward(chunk, prefill);
     if (record)
       return { ...r2, step: { read: chunk.length, logits: r2.logits, passes: r2.passes } };
     return r2;
   };
   let r;
-  for (let i = 0;i < ids.length; i += PREFILL_CHUNK) {
-    yield { reading: i, of: ids.length };
-    r = await forward(ids.slice(i, i + PREFILL_CHUNK));
+  for (let i = from;i < ids.length; i += PREFILL_CHUNK) {
+    yield { reading: i, of: ids.length, reused: from };
+    r = await forward(ids.slice(i, i + PREFILL_CHUNK), true);
     if (r.step)
       yield { step: r.step };
   }
-  yield { reading: ids.length, of: ids.length };
+  if (reuse)
+    engine.keep(ids);
+  yield { reading: ids.length, of: ids.length, reused: from };
   const out = [...ids];
   const wrote = [];
   const spelled = encode(end).length > 1;
@@ -2904,7 +2944,7 @@ async function send(text) {
   let reply = "", n = 0, passes = 0, tStart = 0, ended = "";
   const t0 = performance.now();
   try {
-    for await (const ev of generate(engine, prompt, maxNew, IM_END, { stop: () => stopAsked })) {
+    for await (const ev of generate(engine, prompt, maxNew, IM_END, { stop: () => stopAsked, reuse: params.get("cache") !== "0" })) {
       if (ev.reading !== undefined) {
         $("genStatus").textContent = `Reading the conversation: ${ev.reading} of ${ev.of} bytes`;
         if (ev.reading === ev.of)
