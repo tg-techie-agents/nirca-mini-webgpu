@@ -94,10 +94,22 @@ SOFTWARE.
   .ver { font-size: 11px; white-space: nowrap; opacity: 0.8; }
   .titlebar { display: flex; gap: 12px; align-items: flex-start; }
   .titlebar h1 { flex: 1; min-width: 0; }
-  nav { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-top: 10px; overflow-x: auto; }
-  nav a { padding: 8px 12px; text-decoration: none; color: var(--muted); border-bottom: 2px solid transparent;
+  nav { display: flex; gap: 2px; align-items: stretch; border-bottom: 1px solid var(--line); margin-top: 10px; overflow-x: auto; }
+  nav a { padding: 8px 9px; text-decoration: none; color: var(--muted); border-bottom: 2px solid transparent;
     white-space: nowrap; font-size: 15px; }
-  nav .ver { margin-left: auto; align-self: center; padding: 0 4px; color: var(--muted); }
+  nav .ver { align-self: center; padding: 0 2px 0 4px; color: var(--muted); }
+  nav #shareButton { margin-left: auto; align-self: center; flex: none; width: 32px; height: 32px; padding: 0; display: grid; place-items: center; border-radius: 8px; }
+  nav #shareButton svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  /* the share sheet: a link, one action and the QR code, over a dimmed page */
+  dialog#share { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 16px; padding: 18px 18px 14px;
+    width: min(340px, calc(100vw - 32px)); text-align: center; }
+  dialog#share::backdrop { background: rgba(0, 0, 0, 0.5); }
+  dialog#share h2 { margin: 0 0 4px; font-size: 18px; }
+  dialog#share p { margin: 0; color: var(--muted); font-size: 14px; }
+  dialog#share .qrbox { background: #fff; padding: 8px; border-radius: 12px; width: min(210px, 60vw); margin: 14px auto 10px; line-height: 0; }
+  dialog#share .qr { width: 100%; height: auto; }
+  dialog#share #shareLink { display: block; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; margin-bottom: 14px; }
+  dialog#share .actions { display: flex; gap: 8px; justify-content: center; }
   nav a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--accent); }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
   button { border: 1px solid var(--line); background: var(--panel); color: var(--ink);
@@ -217,7 +229,8 @@ SOFTWARE.
       <a href="#about" data-tab="about">About</a>
       <a href="#charter" data-tab="charter">Charter</a>
       <a href="slides.html" id="slidesLink" target="_blank" rel="noopener">Slides ↗</a>
-      <span class="ver" data-fill="site" title="site v38, built 2026-10-08 from 9313553">site v38</span>
+      <button id="shareButton" type="button" aria-label="Share" title="Share"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M8 7l4-4 4 4M5 11v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/></svg></button>
+      <span class="ver" data-fill="site" title="site v43, built 2026-10-09 from 6033b84">site v43</span>
     </nav>
   </header>
 
@@ -295,6 +308,7 @@ SOFTWARE.
     careful training can take a small model. Nirca Mini is its smallest chat model, made to be a friendly
     companion that helps people think things through. It is an experiment, not a product: it is small,
     it makes mistakes, and it says odd things.</p>
+  <p>Nirca, and this page, are made by <a href="https://github.com/TG-Techie" target="_blank" rel="noopener">@TG-Techie</a> on GitHub.</p>
   <p>The chat page runs the model on your own GPU with WebGPU. Nothing you type leaves the page. Its
     replies match Nirca's own reference code for the same model, step for step.</p>
 
@@ -315,12 +329,12 @@ SOFTWARE.
 
   <h2>How it came to be</h2>
   <p>On 2026-10-07, Nirca Mini began as a cut-down copy of nirca-0, a larger Nirca model, and has
-    trained since on short chats. The copy on this page is step <span data-fill="step">68,718</span>; the page
+    trained since on short chats. The copy on this page is step <span data-fill="step">69,383</span>; the page
     loads newer checkpoints as they are published.</p>
 
   <h2>How it is trained</h2>
-  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">68,718</span>, so for
-    <span data-fill="ternaryShare">98%</span> of its <span data-fill="tokens">1,752,729,629</span> tokens</p>
+  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">69,383</span>, so for
+    <span data-fill="ternaryShare">98%</span> of its <span data-fill="tokens">1,813,722,797</span> tokens</p>
   <div class="diagram"><svg viewBox="0 0 720 300" role="img" aria-labelledby="dtitle">
     <title id="dtitle">Training: open chat datasets and synthetic and private chats are prepared (anonymised,
       put in ChatML, cut to fit, swept for leaks) for the trainer, which writes checkpoints; checkpoints are
@@ -633,6 +647,17 @@ Reply with your next message in the conversation, and nothing else.
 
   </main>
 </div>
+
+<dialog id="share" aria-labelledby="shareTitle">
+  <h2 id="shareTitle">Share Nirca Mini</h2>
+  <p>A small chat model that runs in your own browser.</p>
+  <div class="qrbox"><svg viewBox="0 0 37 37" class="qr" role="img" aria-label="QR code for the link" shape-rendering="crispEdges"><path fill="#fff" d="M0 0h37v37h-37z"/><path class="qrline" stroke="#1d1c1a" d="M2 2.5h7m3 0h1m3 0h1m1 0h5m2 0h1m2 0h7m-33 1h1m5 0h1m2 0h4m2 0h1m1 0h1m2 0h2m4 0h1m5 0h1m-33 1h1m1 0h3m1 0h1m1 0h2m4 0h2m4 0h3m3 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m1 0h2m2 0h1m4 0h1m6 0h1m1 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h6m1 0h1m1 0h1m2 0h1m1 0h3m1 0h1m-33 1h1m5 0h1m1 0h1m1 0h3m1 0h1m2 0h1m2 0h1m3 0h1m1 0h1m5 0h1m-33 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-25 1h1m3 0h1m1 0h1m1 0h1m1 0h1m1 0h4m-24 1h1m1 0h5m2 0h1m2 0h3m2 0h1m4 0h3m1 0h5m-31 1h1m2 0h3m4 0h1m2 0h1m2 0h2m1 0h2m2 0h1m2 0h2m1 0h2m1 0h1m-33 1h7m1 0h1m2 0h1m1 0h3m4 0h3m1 0h1m3 0h1m1 0h2m-32 1h1m2 0h3m2 0h1m1 0h2m1 0h1m1 0h2m2 0h4m2 0h2m1 0h4m-31 1h1m1 0h1m1 0h2m3 0h1m1 0h1m1 0h2m1 0h1m2 0h1m1 0h1m1 0h2m1 0h3m2 0h1m-31 1h4m1 0h7m1 0h1m2 0h3m1 0h2m2 0h1m2 0h1m1 0h2m-33 1h1m4 0h2m3 0h2m3 0h1m5 0h1m3 0h5m1 0h1m-31 1h4m2 0h2m1 0h3m1 0h2m2 0h1m2 0h1m2 0h4m2 0h1m-30 1h1m2 0h3m4 0h1m1 0h1m1 0h3m4 0h2m1 0h1m1 0h2m3 0h1m-33 1h1m1 0h1m2 0h1m3 0h3m4 0h2m1 0h3m1 0h1m1 0h3m1 0h2m1 0h1m-33 1h3m1 0h1m1 0h5m2 0h1m1 0h2m1 0h1m1 0h1m1 0h1m4 0h2m1 0h2m-28 1h1m4 0h2m1 0h4m5 0h2m2 0h1m1 0h4m1 0h1m-29 1h1m1 0h5m2 0h2m2 0h1m2 0h1m1 0h3m3 0h2m1 0h2m-33 1h3m1 0h1m3 0h1m1 0h2m3 0h1m2 0h3m2 0h1m2 0h1m2 0h1m2 0h1m-33 1h1m2 0h2m1 0h3m2 0h1m1 0h1m1 0h4m1 0h2m3 0h1m3 0h1m1 0h1m-32 1h1m2 0h2m2 0h1m5 0h2m1 0h1m2 0h4m4 0h4m1 0h1m-33 1h1m2 0h2m1 0h2m1 0h3m1 0h1m3 0h2m3 0h7m3 0h1m-25 1h3m2 0h2m1 0h6m2 0h1m3 0h1m1 0h1m1 0h1m-33 1h7m2 0h2m1 0h1m1 0h4m2 0h5m1 0h1m1 0h1m1 0h1m-31 1h1m5 0h1m1 0h2m1 0h3m2 0h1m1 0h1m1 0h3m1 0h1m3 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m1 0h2m3 0h3m1 0h1m1 0h1m2 0h1m1 0h6m-30 1h1m1 0h3m1 0h1m1 0h3m2 0h2m2 0h5m1 0h1m1 0h1m2 0h2m1 0h2m-33 1h1m1 0h3m1 0h1m1 0h3m2 0h1m1 0h3m3 0h4m1 0h2m-28 1h1m5 0h1m2 0h1m5 0h1m2 0h2m1 0h2m2 0h2m1 0h3m-31 1h7m1 0h5m4 0h1m5 0h3m1 0h1m3 0h1"/></svg></div>
+  <a id="shareLink" href=""></a>
+  <div class="actions">
+    <button class="primary" id="shareDo" type="button">Share</button>
+    <button id="shareClose" type="button" autofocus>Close</button>
+  </div>
+</dialog>
 
 <div class="toast" id="toast" role="status" hidden>
   <span id="toastText"></span>
@@ -2375,6 +2400,7 @@ function fill(root, f) {
 var params = new URLSearchParams(location.search);
 var slash = (u) => u.endsWith("/") ? u : u + "/";
 var latestUrl = () => new URL(params.get("latest") ?? LATEST_MANIFEST, location.href).href;
+var SHARE_URL = "https://tg-techie-agents.github.io/nirca-mini-webgpu/mini/";
 var PINNED = { "62895": "checkpoints/1217308k/", original: "checkpoints/1168355k/" };
 var choice = Object.hasOwn(PINNED, params.get("model")) ? params.get("model") : "latest";
 async function readPinned(key) {
@@ -3024,6 +3050,39 @@ $("input").addEventListener("focus", () => {
     setTimeout(fitSeen, t);
 });
 $("input").addEventListener("blur", () => setTimeout(fitSeen, 50));
+{
+  const dlg = $("share"), act = $("shareDo");
+  $("shareLink").href = SHARE_URL;
+  $("shareLink").textContent = SHARE_URL.replace(/^https:\/\//, "");
+  act.textContent = navigator.share ? "Share" : "Copy link";
+  $("shareButton").addEventListener("click", () => {
+    act.textContent = navigator.share ? "Share" : "Copy link";
+    dlg.showModal();
+  });
+  $("shareClose").addEventListener("click", () => dlg.close());
+  dlg.addEventListener("click", (e) => {
+    const r = dlg.getBoundingClientRect();
+    if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom)
+      dlg.close();
+  });
+  act.addEventListener("click", async () => {
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: "Nirca Mini", text: "A small chat model that runs in your own browser.", url: SHARE_URL });
+        return;
+      }
+      await navigator.clipboard.writeText(SHARE_URL);
+      act.textContent = "Copied";
+    } catch (e) {
+      if (e?.name === "AbortError")
+        return;
+      act.textContent = "Press and hold the link";
+    }
+    setTimeout(() => {
+      act.textContent = navigator.share ? "Share" : "Copy link";
+    }, 2500);
+  });
+}
 restore();
 showModels();
 showTab();
