@@ -230,7 +230,7 @@ SOFTWARE.
       <a href="#charter" data-tab="charter">Charter</a>
       <a href="slides.html" id="slidesLink" target="_blank" rel="noopener">Slides ↗</a>
       <button id="shareButton" type="button" aria-label="Share" title="Share"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M8 7l4-4 4 4M5 11v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/></svg></button>
-      <span class="ver" data-fill="site" title="site v44, built 2026-10-09 from a1eee2c">site v44</span>
+      <span class="ver" data-fill="site" title="site v46, built 2026-10-10 from 343d83a">site v46</span>
     </nav>
   </header>
 
@@ -329,12 +329,12 @@ SOFTWARE.
 
   <h2>How it came to be</h2>
   <p>On 2026-10-07, Nirca Mini began as a cut-down copy of nirca-0, a larger Nirca model, and has
-    trained since on short chats. The copy on this page is step <span data-fill="step">70,014</span>; the page
+    trained since on short chats. The copy on this page is step <span data-fill="step">72,178</span>; the page
     loads newer checkpoints as they are published.</p>
 
   <h2>How it is trained</h2>
-  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">70,014</span>, so for
-    <span data-fill="ternaryShare">98%</span> of its <span data-fill="tokens">1,871,557,097</span> tokens</p>
+  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">72,178</span>, so for
+    <span data-fill="ternaryShare">99%</span> of its <span data-fill="tokens">2,069,316,115</span> tokens</p>
   <div class="diagram"><svg viewBox="0 0 720 300" role="img" aria-labelledby="dtitle">
     <title id="dtitle">Training: open chat datasets and synthetic and private chats are prepared (anonymised,
       put in ChatML, cut to fit, swept for leaks) for the trainer, which writes checkpoints; checkpoints are
@@ -2441,7 +2441,7 @@ var params = new URLSearchParams(location.search);
 var slash = (u) => u.endsWith("/") ? u : u + "/";
 var latestUrl = () => new URL(params.get("latest") ?? LATEST_MANIFEST, location.href).href;
 var SHARE_URL = "https://tg-techie-agents.github.io/nirca-mini-webgpu/mini/";
-var PINNED = { "62895": "checkpoints/1217308k/", original: "checkpoints/1168355k/" };
+var PINNED = { "72178": "checkpoints/2069316k/", "62895": "checkpoints/1217308k/", original: "checkpoints/1168355k/" };
 var choice = Object.hasOwn(PINNED, params.get("model")) ? params.get("model") : "latest";
 async function readPinned(key) {
   const base = slash(new URL(PINNED[key], LATEST_MANIFEST).href);
@@ -2609,15 +2609,17 @@ function showFacts(config, buffer) {
     $("most").max = cfg.max_steps;
   }
 }
-var MODEL_LABELS = { latest: "Latest, follows the published model", "62895": "Fixed model", original: "Original published model" };
+var MODEL_LABELS = { latest: "Latest, follows the published model", "72178": "Hard checkpoint", "62895": "Fixed model", original: "Original published model" };
+var MODEL_ORDER = ["latest", "72178", "62895", "original"];
+var tokensText = (n) => `${(n / 1e9).toFixed(2)}B tokens`;
 function showModels() {
   const sel = $("model");
   if (!sel.options.length) {
-    for (const key of ["latest", ...Object.keys(PINNED)])
+    for (const key of MODEL_ORDER)
       sel.add(new Option(MODEL_LABELS[key], key));
     for (const key of Object.keys(PINNED))
       readPinned(key).then(([, c]) => {
-        sel.querySelector(`option[value="${key}"]`).textContent = `${MODEL_LABELS[key]} (step ${Number(c.step).toLocaleString("en-US")})`;
+        sel.querySelector(`option[value="${key}"]`).textContent = `${MODEL_LABELS[key]} (step ${Number(c.step).toLocaleString("en-US")}${c.tokens ? `, ${tokensText(c.tokens)}` : ""})`;
       }).catch(() => {});
   }
   sel.value = choice;
