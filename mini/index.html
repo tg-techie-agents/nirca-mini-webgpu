@@ -109,7 +109,8 @@ SOFTWARE.
   dialog#share .qrbox { background: #fff; padding: 8px; border-radius: 12px; width: min(210px, 60vw); margin: 14px auto 10px; line-height: 0; }
   dialog#share .qr { width: 100%; height: auto; }
   dialog#share #shareLink { display: block; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; margin-bottom: 14px; }
-  dialog#share .actions { display: flex; gap: 8px; justify-content: center; }
+  dialog#share .actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+  dialog#share .actions button[hidden] { display: none; }
   nav a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--accent); }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
   button { border: 1px solid var(--line); background: var(--panel); color: var(--ink);
@@ -230,7 +231,7 @@ SOFTWARE.
       <a href="#charter" data-tab="charter">Charter</a>
       <a href="slides.html" id="slidesLink" target="_blank" rel="noopener">Slides ↗</a>
       <button id="shareButton" type="button" aria-label="Share" title="Share"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M8 7l4-4 4 4M5 11v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/></svg></button>
-      <span class="ver" data-fill="site" title="site v46, built 2026-10-10 from 343d83a">site v46</span>
+      <span class="ver" data-fill="site" title="site v48, built 2026-10-13 from 41248b1">site v48</span>
     </nav>
   </header>
 
@@ -329,12 +330,12 @@ SOFTWARE.
 
   <h2>How it came to be</h2>
   <p>On 2026-10-07, Nirca Mini began as a cut-down copy of nirca-0, a larger Nirca model, and has
-    trained since on short chats. The copy on this page is step <span data-fill="step">72,178</span>; the page
+    trained since on short chats. The copy on this page is step <span data-fill="step">88,049</span>; the page
     loads newer checkpoints as they are published.</p>
 
   <h2>How it is trained</h2>
-  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">72,178</span>, so for
-    <span data-fill="ternaryShare">99%</span> of its <span data-fill="tokens">2,069,316,115</span> tokens</p>
+  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">88,049</span>, so for
+    <span data-fill="ternaryShare">99%</span> of its <span data-fill="tokens">3,411,051,311</span> tokens</p>
   <div class="diagram"><svg viewBox="0 0 720 300" role="img" aria-labelledby="dtitle">
     <title id="dtitle">Training: open chat datasets and synthetic and private chats are prepared (anonymised,
       put in ChatML, cut to fit, swept for leaks) for the trainer, which writes checkpoints; checkpoints are
@@ -654,7 +655,8 @@ Reply with your next message in the conversation, and nothing else.
   <div class="qrbox"><svg viewBox="0 0 37 37" class="qr" role="img" aria-label="QR code for the link" shape-rendering="crispEdges"><path fill="#fff" d="M0 0h37v37h-37z"/><path class="qrline" stroke="#1d1c1a" d="M2 2.5h7m3 0h1m3 0h1m1 0h5m2 0h1m2 0h7m-33 1h1m5 0h1m2 0h4m2 0h1m1 0h1m2 0h2m4 0h1m5 0h1m-33 1h1m1 0h3m1 0h1m1 0h2m4 0h2m4 0h3m3 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m1 0h2m2 0h1m4 0h1m6 0h1m1 0h1m1 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h6m1 0h1m1 0h1m2 0h1m1 0h3m1 0h1m-33 1h1m5 0h1m1 0h1m1 0h3m1 0h1m2 0h1m2 0h1m3 0h1m1 0h1m5 0h1m-33 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-25 1h1m3 0h1m1 0h1m1 0h1m1 0h1m1 0h4m-24 1h1m1 0h5m2 0h1m2 0h3m2 0h1m4 0h3m1 0h5m-31 1h1m2 0h3m4 0h1m2 0h1m2 0h2m1 0h2m2 0h1m2 0h2m1 0h2m1 0h1m-33 1h7m1 0h1m2 0h1m1 0h3m4 0h3m1 0h1m3 0h1m1 0h2m-32 1h1m2 0h3m2 0h1m1 0h2m1 0h1m1 0h2m2 0h4m2 0h2m1 0h4m-31 1h1m1 0h1m1 0h2m3 0h1m1 0h1m1 0h2m1 0h1m2 0h1m1 0h1m1 0h2m1 0h3m2 0h1m-31 1h4m1 0h7m1 0h1m2 0h3m1 0h2m2 0h1m2 0h1m1 0h2m-33 1h1m4 0h2m3 0h2m3 0h1m5 0h1m3 0h5m1 0h1m-31 1h4m2 0h2m1 0h3m1 0h2m2 0h1m2 0h1m2 0h4m2 0h1m-30 1h1m2 0h3m4 0h1m1 0h1m1 0h3m4 0h2m1 0h1m1 0h2m3 0h1m-33 1h1m1 0h1m2 0h1m3 0h3m4 0h2m1 0h3m1 0h1m1 0h3m1 0h2m1 0h1m-33 1h3m1 0h1m1 0h5m2 0h1m1 0h2m1 0h1m1 0h1m1 0h1m4 0h2m1 0h2m-28 1h1m4 0h2m1 0h4m5 0h2m2 0h1m1 0h4m1 0h1m-29 1h1m1 0h5m2 0h2m2 0h1m2 0h1m1 0h3m3 0h2m1 0h2m-33 1h3m1 0h1m3 0h1m1 0h2m3 0h1m2 0h3m2 0h1m2 0h1m2 0h1m2 0h1m-33 1h1m2 0h2m1 0h3m2 0h1m1 0h1m1 0h4m1 0h2m3 0h1m3 0h1m1 0h1m-32 1h1m2 0h2m2 0h1m5 0h2m1 0h1m2 0h4m4 0h4m1 0h1m-33 1h1m2 0h2m1 0h2m1 0h3m1 0h1m3 0h2m3 0h7m3 0h1m-25 1h3m2 0h2m1 0h6m2 0h1m3 0h1m1 0h1m1 0h1m-33 1h7m2 0h2m1 0h1m1 0h4m2 0h5m1 0h1m1 0h1m1 0h1m-31 1h1m5 0h1m1 0h2m1 0h3m2 0h1m1 0h1m1 0h3m1 0h1m3 0h3m1 0h1m-33 1h1m1 0h3m1 0h1m1 0h2m3 0h3m1 0h1m1 0h1m2 0h1m1 0h6m-30 1h1m1 0h3m1 0h1m1 0h3m2 0h2m2 0h5m1 0h1m1 0h1m2 0h2m1 0h2m-33 1h1m1 0h3m1 0h1m1 0h3m2 0h1m1 0h3m3 0h4m1 0h2m-28 1h1m5 0h1m2 0h1m5 0h1m2 0h2m1 0h2m2 0h2m1 0h3m-31 1h7m1 0h5m4 0h1m5 0h3m1 0h1m3 0h1"/></svg></div>
   <a id="shareLink" href=""></a>
   <div class="actions">
-    <button class="primary" id="shareDo" type="button">Share</button>
+    <button class="primary" id="shareCopy" type="button">Copy link</button>
+    <button id="shareDo" type="button" hidden>Share</button>
     <button id="shareClose" type="button" autofocus>Close</button>
   </div>
 </dialog>
@@ -3093,36 +3095,47 @@ $("input").addEventListener("focus", () => {
 });
 $("input").addEventListener("blur", () => setTimeout(fitSeen, 50));
 {
-  const dlg = $("share"), act = $("shareDo");
+  const dlg = $("share"), copy = $("shareCopy"), act = $("shareDo");
   $("shareLink").href = SHARE_URL;
   $("shareLink").textContent = SHARE_URL.replace(/^https:\/\//, "");
-  act.textContent = navigator.share ? "Share" : "Copy link";
-  $("shareButton").addEventListener("click", () => {
-    act.textContent = navigator.share ? "Share" : "Copy link";
-    dlg.showModal();
-  });
+  act.hidden = !navigator.share;
+  $("shareButton").addEventListener("click", () => dlg.showModal());
   $("shareClose").addEventListener("click", () => dlg.close());
   dlg.addEventListener("click", (e) => {
     const r = dlg.getBoundingClientRect();
     if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom)
       dlg.close();
   });
+  let reset = 0;
+  copy.addEventListener("click", async () => {
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(SHARE_URL);
+      ok = true;
+    } catch {
+      const t = Object.assign(document.createElement("textarea"), { value: SHARE_URL, readOnly: true });
+      t.style.cssText = "position:fixed;opacity:0;font-size:16px";
+      dlg.append(t);
+      t.select();
+      t.setSelectionRange(0, SHARE_URL.length);
+      try {
+        ok = document.execCommand("copy");
+      } catch {}
+      t.remove();
+    }
+    copy.textContent = ok ? "Copied" : "Press and hold the link";
+    clearTimeout(reset);
+    reset = setTimeout(() => {
+      copy.textContent = "Copy link";
+    }, 2500);
+  });
   act.addEventListener("click", async () => {
     try {
-      if (navigator.share) {
-        await navigator.share({ title: "Nirca Mini", text: "A small chat model that runs in your own browser.", url: SHARE_URL });
-        return;
-      }
-      await navigator.clipboard.writeText(SHARE_URL);
-      act.textContent = "Copied";
+      await navigator.share({ title: "Nirca Mini", text: "A small chat model that runs in your own browser.", url: SHARE_URL });
     } catch (e) {
-      if (e?.name === "AbortError")
-        return;
-      act.textContent = "Press and hold the link";
+      if (e?.name !== "AbortError")
+        copy.click();
     }
-    setTimeout(() => {
-      act.textContent = navigator.share ? "Share" : "Copy link";
-    }, 2500);
   });
 }
 restore();
