@@ -161,12 +161,19 @@ SOFTWARE.
   textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
   .tools { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
   details#settings summary { color: var(--muted); font-size: 13px; cursor: pointer; }
-  .settings { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-top: 8px; }
+  /* Nothing in the panel is wider than the panel: a flex item's minimum width is its content's unless set to 0, so
+     the Model select (its widest option, "Latest, follows the published model (step 92,864, 3.64B tokens)") pushed the
+     whole panel past the screen. The rules marked [no-overflow] are what tools/overflow.mjs --selftest removes. */
+  .tools > details, details#settings { min-width: 0; max-width: 100%; }
+  .settings { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-top: 8px; min-width: 0; max-width: 100%; }
   label.small { color: var(--muted); font-size: 13px; display: flex; gap: 6px; align-items: center; }
+  .settings > label.small { min-width: 0; max-width: 100%; }                                  /* [no-overflow] */
+  .settings > label.wide { flex: 1 1 100%; }
   label.small select { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; min-width: 0; max-width: 100%; }
+  .settings > label.wide select { flex: 1 1 0; width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }                      /* [no-overflow] */
   label.small input { width: 64px; color: var(--ink); background: var(--panel);
     border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; }
-  .hint { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 12px; }
+  .hint { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
   #newChat, #chatsButton { padding: 4px 10px; font-size: 14px; white-space: nowrap; flex: none; }
   body:not(.chat) #newChat, body:not(.chat) #chatsButton { display: none; }
   #chatsButton[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
@@ -182,12 +189,15 @@ SOFTWARE.
   #chatList li[aria-current="true"] .open { background: var(--soft); }
   #chatList .del { border: 0; background: none; color: var(--muted); padding: 0 12px; font-size: 18px; }
   #chats .hint { padding: 8px; }
-  #chats .headRow { display: flex; justify-content: space-between; align-items: baseline; padding-right: 8px; }
-  #chats .headRow .linkish { font-size: 12px; }
+  #chats .headRow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 16px; }
+  button.exportLink { color: var(--ink); font-size: 13px; }
+  button.exportLink:disabled { color: var(--muted); text-decoration: none; cursor: default; }
   button.linkish { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); text-decoration: underline; cursor: pointer; }
   button.linkish:hover { color: var(--accent); }
   dialog#share .small { margin: 10px 0 0; font-size: 12px; color: var(--muted); text-align: center; }
   dialog#share .small:empty { display: none; }
+  dialog#share .links button { font-size: 13px; }
+  dialog#share .links { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 16px; }
   #shareChatUrl { width: 100%; box-sizing: border-box; margin-top: 8px; font-size: 16px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); }
   .headline { list-style: none; padding: 12px 14px; margin: 12px 0 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel, transparent); }
   .headline li + li { margin-top: 8px; }
@@ -238,13 +248,13 @@ SOFTWARE.
       <a href="#charter" data-tab="charter">Charter</a>
       <a href="slides.html" id="slidesLink" target="_blank" rel="noopener">Slides ↗</a>
       <button id="shareButton" type="button" aria-label="Share" title="Share"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M8 7l4-4 4 4M5 11v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/></svg></button>
-      <span class="ver" data-fill="site" title="site v54, built 2026-10-14 from 39df695">site v54</span>
+      <span class="ver" data-fill="site" title="site v56, built 2026-10-14 from d4c8ede">site v56</span>
     </nav>
   </header>
 
   <main id="chatTab">
     <section class="panel" id="chats" hidden aria-label="Saved chats">
-      <div class="headRow"><h2 class="listHead">History</h2><button class="linkish" id="exportChats" type="button" title="Download every saved chat as a JSON file, made in this browser">Export chats</button></div>
+      <div class="headRow"><h2 class="listHead">History</h2><button class="linkish exportLink" data-export type="button" title="Download every saved chat as a JSON file, made in this browser">Export chats</button></div>
       <ul id="chatList"></ul>
       <p class="hint" id="chatsNone">No saved chats yet. A chat is kept in this browser once it has a reply.</p>
     </section>
@@ -275,7 +285,7 @@ SOFTWARE.
         <details id="settings">
           <summary>Settings (<span id="sumExperts"></span> Active Experts ⋅ <span id="sumPasses"></span> Recurrence passes)</summary>
           <div class="settings">
-            <label class="small">Model <select id="model" disabled></select></label>
+            <label class="small wide">Model <select id="model" disabled></select></label>
             <label class="small">Experts per byte <input id="topK" type="number" inputmode="numeric" min="1" max="32" value="32"></label>
             <label class="small">Recurrence passes, least <input id="least" type="number" inputmode="numeric" min="1" max="24" value="1"></label>
             <label class="small">most <input id="most" type="number" inputmode="numeric" min="1" max="24" value="24"></label>
@@ -670,7 +680,7 @@ Reply with your next message in the conversation, and nothing else.
     <button id="shareDo" type="button" hidden>Share</button>
     <button id="shareClose" type="button" autofocus>Close</button>
   </div>
-  <p class="small"><button class="linkish" id="shareChat" type="button" hidden>Copy a link to this chat</button></p>
+  <p class="small links"><button class="linkish" id="shareChat" type="button" hidden>Copy a link to this chat</button><button class="linkish exportLink" data-export type="button">Export chats</button></p>
   <p class="small" id="shareChatNote"></p>
   <input id="shareChatUrl" type="text" readonly hidden aria-label="Link to this chat">
 </dialog>
@@ -741,7 +751,7 @@ class LibraryTooOld extends NircaWebGPUError {
 }
 
 // lib/nirca-webgpu/src/checkpoint.js
-var VERSION = "0.2.0";
+var VERSION = "0.3.0";
 var MAX_EXPERTS = 256;
 var MAX_SLOTS = 64;
 var MAX_STEPS = 31;
@@ -2528,6 +2538,7 @@ ${text}${IM_END}
 `);
   return at === -1 ? cut : cut.slice(at);
 }
+var CHAT_FORMATS = { chatml: buildPrompt };
 
 class Tokenizer {
   constructor(manifest) {
@@ -2536,6 +2547,9 @@ class Tokenizer {
       throw new Error(`this tokenizer has ${VOCAB} ids; the checkpoint's vocab_size is ${vocab}`);
     this.block = manifest.cfg.block;
     this.vocab = vocab;
+    this.chatFormat = manifest.chat_format ?? "chatml";
+    if (!Object.hasOwn(CHAT_FORMATS, this.chatFormat))
+      throw new UnsupportedCheckpoint("chat_format", this.chatFormat, `this version writes ${Object.keys(CHAT_FORMATS).join(", ")}`);
   }
   encode(text) {
     return encode(text);
@@ -2544,7 +2558,7 @@ class Tokenizer {
     return decode(ids);
   }
   chat(messages) {
-    return encode(buildPrompt(messages, Math.floor(this.block * 0.9)));
+    return encode(CHAT_FORMATS[this.chatFormat](messages, Math.floor(this.block * 0.9)));
   }
 }
 // lib/nirca-webgpu/src/decode.js
@@ -3007,6 +3021,7 @@ async function cachedModel() {
 async function startEngine(buffer, config) {
   let e;
   try {
+    new Tokenizer(config);
     const ckpt = await loadCheckpoint({ weights: new Uint8Array(buffer), manifest: config });
     e = await createEngine(ckpt, { onLost: engineLost });
     e.reset();
@@ -3385,7 +3400,10 @@ function renderChats() {
   list.replaceChildren();
   const ids = Object.keys(chats).sort((a, b) => chats[b].updated - chats[a].updated);
   $("chatsNone").hidden = ids.length > 0;
-  $("exportChats").hidden = ids.length === 0;
+  for (const b of document.querySelectorAll("[data-export]")) {
+    b.disabled = ids.length === 0;
+    b.textContent = ids.length ? "Export chats" : "No chats to export";
+  }
   for (const id of ids) {
     const c = chats[id];
     const li = document.createElement("li");
@@ -3663,18 +3681,19 @@ $("input").addEventListener("blur", () => setTimeout(fitSeen, 50));
     }
   });
 }
-$("exportChats").addEventListener("click", () => {
-  const site = document.querySelector('[data-fill="site"]')?.textContent?.trim() || null;
-  const text = JSON.stringify(exportChats(chats, { page: site }), null, 2);
-  const a = Object.assign(document.createElement("a"), {
-    href: URL.createObjectURL(new Blob([text], { type: "application/json" })),
-    download: `nirca-mini-chats-${new Date().toISOString().slice(0, 10)}.json`
+for (const b of document.querySelectorAll("[data-export]"))
+  b.addEventListener("click", () => {
+    const site = document.querySelector('[data-fill="site"]')?.textContent?.trim() || null;
+    const text = JSON.stringify(exportChats(chats, { page: site }), null, 2);
+    const a = Object.assign(document.createElement("a"), {
+      href: URL.createObjectURL(new Blob([text], { type: "application/json" })),
+      download: `nirca-mini-chats-${new Date().toISOString().slice(0, 10)}.json`
+    });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1e4);
   });
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1e4);
-});
 var chatLink = async () => `${location.origin}${location.pathname}#${FRAGMENT}${await packChat(messages)}`;
 var shared = false;
 {
