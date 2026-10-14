@@ -231,7 +231,7 @@ SOFTWARE.
       <a href="#charter" data-tab="charter">Charter</a>
       <a href="slides.html" id="slidesLink" target="_blank" rel="noopener">Slides ↗</a>
       <button id="shareButton" type="button" aria-label="Share" title="Share"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M8 7l4-4 4 4M5 11v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/></svg></button>
-      <span class="ver" data-fill="site" title="site v50, built 2026-10-13 from 94323a5">site v50</span>
+      <span class="ver" data-fill="site" title="site v51, built 2026-10-14 from e303a12">site v51</span>
     </nav>
   </header>
 
@@ -331,12 +331,12 @@ SOFTWARE.
 
   <h2>How it came to be</h2>
   <p>On 2026-10-07, Nirca Mini began as a cut-down copy of nirca-0, a larger Nirca model, and has
-    trained since on short chats. The copy on this page is step <span data-fill="step">89,338</span>; the page
+    trained since on short chats. The copy on this page is step <span data-fill="step">92,864</span>; the page
     loads newer checkpoints as they are published.</p>
 
   <h2>How it is trained</h2>
-  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">89,338</span>, so for
-    <span data-fill="ternaryShare">99%</span> of its <span data-fill="tokens">3,504,210,405</span> tokens</p>
+  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">92,864</span>, so for
+    <span data-fill="ternaryShare">99%</span> of its <span data-fill="tokens">3,639,609,376</span> tokens</p>
   <div class="diagram"><svg viewBox="0 0 720 300" role="img" aria-labelledby="dtitle">
     <title id="dtitle">Training: open chat datasets and synthetic and private chats are prepared (anonymised,
       put in ChatML, cut to fit, swept for leaks) for the trainer, which writes checkpoints; checkpoints are
@@ -667,70 +667,286 @@ Reply with your next message in the conversation, and nothing else.
   <button id="toastOk" type="button">OK</button>
 </div>
 <script type="module">
-var __defProp = Object.defineProperty;
-var __returnValue = (v) => v;
-function __exportSetter(name, newValue) {
-  this[name] = __returnValue.bind(null, newValue);
+// lib/nirca-webgpu/src/errors.js
+class NircaWebGPUError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = new.target.name;
+  }
 }
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, {
-      get: all[name],
-      enumerable: true,
-      configurable: true,
-      set: __exportSetter.bind(all, name)
-    });
-};
 
-// web/kernels.js
-var exports_kernels = {};
-__export(exports_kernels, {
-  TRACE: () => TRACE,
-  ROUTER: () => ROUTER,
-  ROUTE: () => ROUTE,
-  ROPE_KV: () => ROPE_KV,
-  RMSNORM: () => RMSNORM,
-  QMM2: () => QMM2,
-  QMM1: () => QMM1,
-  QMM: () => QMM,
-  PICK: () => PICK,
-  INIT: () => INIT,
-  GROUP: () => GROUP,
-  GCLEAR: () => GCLEAR,
-  EXPERT_SUM: () => EXPERT_SUM,
-  EXPERT2G: () => EXPERT2G,
-  EXPERT2: () => EXPERT2,
-  EXPERT13G: () => EXPERT13G,
-  EXPERT13: () => EXPERT13,
-  EXIT: () => EXIT,
-  EMBED: () => EMBED,
-  CAPACITY: () => CAPACITY,
-  ATTN1P: () => ATTN1P,
-  ATTN1M: () => ATTN1M,
-  ATTN: () => ATTN,
-  ADMIT: () => ADMIT,
-  ADAPTER1: () => ADAPTER1,
-  ADAPTER: () => ADAPTER
-});
-var HEADER = `
+class UnsupportedCheckpoint extends NircaWebGPUError {
+  constructor(field, value, reason) {
+    super(`unsupported checkpoint: ${field} = ${JSON.stringify(value)}${reason ? ` (${reason})` : ""}`);
+    this.field = field;
+    this.value = value;
+  }
+}
+
+class TruncatedCheckpoint extends NircaWebGPUError {
+  constructor(have, need) {
+    super(`the weights are cut short: ${have} bytes of ${need}`);
+    this.have = have;
+    this.need = need;
+  }
+}
+
+class HashMismatch extends NircaWebGPUError {
+  constructor(want, got) {
+    super(`the weights' sha256 is ${got}, not ${want}`);
+    this.want = want;
+    this.got = got;
+  }
+}
+
+class NoWebGPU extends NircaWebGPUError {
+}
+
+class DeviceTooSmall extends NircaWebGPUError {
+  constructor(limit, needed, have) {
+    super(`this GPU's ${limit} is ${have}; this model needs ${needed}`);
+    this.limit = limit;
+    this.needed = needed;
+    this.have = have;
+  }
+}
+
+class DeviceLost extends NircaWebGPUError {
+  constructor(reason, message) {
+    super(`the GPU device was lost (${reason}${message ? `: ${message}` : ""})`);
+    this.reason = reason;
+    this.deviceMessage = message;
+  }
+}
+
+class LibraryTooOld extends NircaWebGPUError {
+  constructor(have, need) {
+    super(`this library is ${have}; the checkpoint needs ${need} or newer`);
+    this.have = have;
+    this.need = need;
+  }
+}
+
+// lib/nirca-webgpu/src/checkpoint.js
+var VERSION = "0.2.0";
+var MAX_EXPERTS = 256;
+var MAX_SLOTS = 64;
+var MAX_STEPS = 31;
+function parseSafetensors(buf) {
+  const view = new DataView(buf instanceof ArrayBuffer ? buf : buf.buffer, buf.byteOffset ?? 0);
+  if (buf.byteLength < 8)
+    throw new TruncatedCheckpoint(buf.byteLength, 8);
+  const n = Number(view.getBigUint64(0, true));
+  if (buf.byteLength < 8 + n)
+    throw new TruncatedCheckpoint(buf.byteLength, 8 + n);
+  const base = buf instanceof ArrayBuffer ? buf : buf.buffer;
+  const off = buf.byteOffset ?? 0;
+  const header = JSON.parse(new TextDecoder().decode(new Uint8Array(base, off + 8, n)));
+  const start = off + 8 + n;
+  const tensors = {};
+  let need = 8 + n;
+  for (const [name, t] of Object.entries(header)) {
+    if (name === "__metadata__")
+      continue;
+    const [a, b] = t.data_offsets;
+    need = Math.max(need, 8 + n + b);
+    if (buf.byteLength < need)
+      throw new TruncatedCheckpoint(buf.byteLength, need);
+    tensors[name] = { dtype: t.dtype, shape: t.shape, bytes: new Uint8Array(base, start + a, b - a) };
+  }
+  return { tensors, metadata: header.__metadata__ ?? {} };
+}
+var sha256Hex = async (bytes) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((b) => b.toString(16).padStart(2, "0")).join("");
+var fetchBytes = async (url, onProgress) => {
+  const res = await fetch(url);
+  if (!res.ok)
+    throw new Error(`${url}: HTTP ${res.status}`);
+  const total = Number(res.headers.get("content-length")) || 0;
+  if (!res.body || !onProgress)
+    return new Uint8Array(await res.arrayBuffer());
+  const chunks = [];
+  let got = 0;
+  const reader = res.body.getReader();
+  for (;; ) {
+    const { done, value } = await reader.read();
+    if (done)
+      break;
+    chunks.push(value);
+    got += value.length;
+    onProgress(got, total);
+  }
+  const out = new Uint8Array(got);
+  let at = 0;
+  for (const c of chunks) {
+    out.set(c, at);
+    at += c.length;
+  }
+  return out;
+};
+var semver = (v) => String(v).split(".").map((x) => Number.parseInt(x, 10) || 0);
+var olderThan = (a, b) => {
+  const x = semver(a), y = semver(b);
+  for (let i = 0;i < 3; i++)
+    if ((x[i] ?? 0) !== (y[i] ?? 0))
+      return (x[i] ?? 0) < (y[i] ?? 0);
+  return false;
+};
+function shapeOf(manifest, tensors = null) {
+  const c = manifest?.cfg;
+  if (!c || typeof c !== "object")
+    throw new UnsupportedCheckpoint("cfg", c, "the manifest has none");
+  if (manifest.min_library && olderThan(VERSION, manifest.min_library))
+    throw new LibraryTooOld(VERSION, manifest.min_library);
+  const need = (cond, field, value, reason) => {
+    if (!cond)
+      throw new UnsupportedCheckpoint(field, value, reason);
+  };
+  need(manifest.quant === "ternary", "quant", manifest.quant, "only ternary weights are read");
+  need(manifest.quant_scope === "all", "quant_scope", manifest.quant_scope, "only scope all is read");
+  need(c.tie_embeddings === true, "cfg.tie_embeddings", c.tie_embeddings);
+  need(c.n_recur === 1 && c.n_coda === 0, "cfg.n_recur/n_coda", [c.n_recur, c.n_coda], "one recurrent block and no coda");
+  need(Number.isInteger(c.n_prelude) && c.n_prelude >= 0 && c.n_prelude <= 8, "cfg.n_prelude", c.n_prelude);
+  need(c.halt_freeze === true, "cfg.halt_freeze", c.halt_freeze);
+  need((c.min_steps ?? 1) === 1, "cfg.min_steps", c.min_steps, "only 1 is implemented");
+  need(c.halt_thresh === 0.9, "cfg.halt_thresh", c.halt_thresh, "only 0.9 is implemented");
+  const { d_model: d, n_head: heads } = c;
+  need(Number.isInteger(d) && d % 256 === 0, "cfg.d_model", d, "a multiple of 256");
+  need(heads * 64 === d, "cfg.n_head", heads, "heads of 64: d_model / 64");
+  need(Number.isInteger(c.d_ff) && c.d_ff % 128 === 0, "cfg.d_ff", c.d_ff, "a multiple of 128");
+  need(Number.isInteger(c.pool_d_ff) && c.pool_d_ff % 128 === 0, "cfg.pool_d_ff", c.pool_d_ff, "a multiple of 128");
+  const experts = manifest.n_experts ?? c.pool_experts;
+  need(Number.isInteger(experts) && experts >= 1 && experts <= MAX_EXPERTS, "n_experts", experts, `1 to ${MAX_EXPERTS}`);
+  need(c.pool_experts === undefined || c.pool_experts === experts, "cfg.pool_experts", c.pool_experts, "differs from n_experts");
+  need(c.pool_resident >= experts, "cfg.pool_resident", c.pool_resident, "every expert resident");
+  need(Number.isInteger(c.pool_top_k) && c.pool_top_k >= 1 && c.pool_top_k <= Math.min(experts, MAX_SLOTS), "cfg.pool_top_k", c.pool_top_k);
+  need(Number.isInteger(c.block) && c.block >= 512 && c.block % 64 === 0, "cfg.block", c.block, "a multiple of 64, at least 512");
+  need(Number.isInteger(c.max_steps) && c.max_steps >= 1 && c.max_steps <= MAX_STEPS, "cfg.max_steps", c.max_steps, `1 to ${MAX_STEPS}`);
+  need(Number.isInteger(c.vocab_size) && c.vocab_size >= 1, "cfg.vocab_size", c.vocab_size);
+  need(c.rope_theta > 0, "cfg.rope_theta", c.rope_theta);
+  const shape = {
+    d,
+    heads,
+    ff: c.d_ff,
+    expertFf: c.pool_d_ff,
+    vocab: c.vocab_size,
+    experts,
+    slots: Math.min(experts, MAX_SLOTS),
+    block: c.block,
+    maxSteps: c.max_steps,
+    prelude: c.n_prelude,
+    topK: c.pool_top_k,
+    cf: c.pool_capacity_factor ?? 1.5,
+    haltThresh: c.halt_thresh,
+    theta: c.rope_theta
+  };
+  if (tensors)
+    checkTensors(shape, tensors);
+  return shape;
+}
+function checkTensors(sh, T) {
+  const want = (name, shape) => {
+    const t = T[name];
+    if (!t)
+      throw new UnsupportedCheckpoint(`tensor ${name}`, null, "missing");
+    if (shape.length !== t.shape.length || shape.some((v, i) => v !== t.shape[i])) {
+      throw new UnsupportedCheckpoint(`tensor ${name}`, t.shape, `expected ${JSON.stringify(shape)} for this config`);
+    }
+  };
+  const g = (n) => n / 128;
+  const tern = (name, rows, cols, lead = []) => {
+    want(`${name}.codes`, [...lead, rows, cols / 16]);
+    want(`${name}.scales`, [...lead, rows, g(cols)]);
+    want(`${name}.biases`, [...lead, rows, g(cols)]);
+  };
+  const { d, ff, expertFf: eff, vocab, experts: E } = sh;
+  tern("tok_emb.weight", vocab, d);
+  for (let i = 0;i < sh.prelude; i++) {
+    const p = `prelude.${i}`;
+    want(`${p}.ln1.weight`, [d]);
+    want(`${p}.ln2.weight`, [d]);
+    tern(`${p}.attn.qkv.weight`, 3 * d, d);
+    tern(`${p}.attn.proj.weight`, d, d);
+    tern(`${p}.mlp.w1.weight`, ff, d);
+    tern(`${p}.mlp.w3.weight`, ff, d);
+    tern(`${p}.mlp.w2.weight`, d, ff);
+  }
+  want("recur.0.ln1.weight", [d]);
+  want("recur.0.ln2.weight", [d]);
+  tern("recur.0.attn.qkv.weight", 3 * d, d);
+  tern("recur.0.attn.proj.weight", d, d);
+  want("recur.0.mlp.depth_emb", [d]);
+  want("recur.0.mlp.router.weight", [E, d]);
+  tern("pool.w1", eff, d, [E]);
+  tern("pool.w3", eff, d, [E]);
+  tern("pool.w2", d, eff, [E]);
+  want("pool.gate", [E]);
+  want("adapter.weight", [d, 2 * d]);
+  want("ln_f.weight", [d]);
+  want("halt.weight", [1, d]);
+  want("halt.bias", [1]);
+}
+async function loadCheckpoint({ weights, manifest, onProgress, sha256 } = {}) {
+  const man = typeof manifest === "string" ? await (await fetch(manifest)).json() : manifest;
+  const bytes = typeof weights === "string" ? await fetchBytes(weights, onProgress) : weights instanceof Uint8Array ? weights : new Uint8Array(weights);
+  if (sha256) {
+    const got = await sha256Hex(bytes);
+    if (got !== sha256)
+      throw new HashMismatch(sha256, got);
+  }
+  const { tensors } = parseSafetensors(bytes);
+  return { manifest: man, shape: shapeOf(man, tensors), tensors, bytes };
+}
+// lib/nirca-webgpu/src/kernels.js
+function stateLayout(shape) {
+  const mw = Math.ceil(shape.experts / 32);
+  return {
+    ADMITTED: 0,
+    VOTE: mw,
+    REQ: 2 * mw,
+    K: 3 * mw,
+    BOUND: 3 * mw + 1,
+    STEPS: 3 * mw + 2,
+    COUNT: 32,
+    NEWLY: 64,
+    HALTED: 1024,
+    CUM: 2048,
+    WORDS: 4096,
+    MW: mw
+  };
+}
+function kernelSources(shape) {
+  const L = stateLayout(shape);
+  const slots = shape.slots;
+  const HEADER = `
 struct G { rows: u32, offset: u32, topk: u32, lohi: u32 }   // lohi: least | most << 16
 struct S { inDim: u32, outDim: u32, rows1: u32, gate: u32,
            pass_: u32, first: u32, last: u32, cf: f32 }
-// state, as u32 words (see engine.js: ST_*)
-const ADMITTED = 0u; const VOTE = 1u; const REQ = 2u; const K = 3u;
-const BOUND = 4u; const STEPS = 5u; const COUNT = 16u; const NEWLY = 48u;
-const HALTED = 1024u; const CUM = 2048u;
+// state, as u32 words (stateLayout)
+const ADMITTED = ${L.ADMITTED}u; const VOTE = ${L.VOTE}u; const REQ = ${L.REQ}u; const K = ${L.K}u;
+const BOUND = ${L.BOUND}u; const STEPS = ${L.STEPS}u; const COUNT = ${L.COUNT}u; const NEWLY = ${L.NEWLY}u;
+const HALTED = ${L.HALTED}u; const CUM = ${L.CUM}u;
 const NONE = 0xffffffffu;
-const D = 512u;
+// the shape
+const D = ${shape.d}u;                  // width
+const QKV = ${3 * shape.d}u;
+const HP = ${shape.heads * 32}u;           // (head, rope pair)s of a row
+const EFF = ${shape.expertFf}u;          // an expert's hidden width
+const VOC = ${shape.vocab}u;
+const NE = ${shape.experts}u;            // experts
+const MW = ${L.MW}u;                 // words of an expert mask
+const SL = ${slots}u;                 // expert choices a row can make (top-k at most)
+const RS = ${3 * slots}u;                // a row's route: expert, weight, kept, SL each
+const CH = ${Math.ceil(shape.block / 64)}u;                // chunks of 64 keys in the cache
+const MAXIN = ${Math.max(shape.d, shape.ff)}u;            // widest input of a dense projection
 `;
-var GATE = `
+  const GATE = `
 var<workgroup> gateOpen: u32;
 fn gateClosed(lid: u32) -> bool {
   if (lid == 0u) { gateOpen = select(1u, st[s.gate], s.gate != NONE); }
   return workgroupUniformLoad(&gateOpen) == 0u;
 }
 `;
-var QMM = HEADER + `
+  const QMM = HEADER + `
 @group(0) @binding(0) var<uniform> g: G;
 @group(0) @binding(1) var<uniform> s: S;
 @group(0) @binding(2) var<storage, read> x: array<f32>;
@@ -792,7 +1008,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
     }
   }
 }`;
-var QMM2 = HEADER + `
+  const QMM2 = HEADER + `
 @group(0) @binding(0) var<uniform> g: G;
 @group(0) @binding(1) var<uniform> s: S;
 @group(0) @binding(2) var<storage, read> x: array<f32>;
@@ -863,7 +1079,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
     }
   }
 }`;
-var EMBED = HEADER + `
+  const EMBED = HEADER + `
 @group(0) @binding(0) var<uniform> g: G;
 @group(0) @binding(1) var<storage, read> ids: array<u32>;
 @group(0) @binding(2) var<storage, read> codes: array<u32>;
@@ -875,11 +1091,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (i >= g.rows * D) { return; }
   let r = i / D; let k = i % D;
   let id = ids[r];
-  let q = f32((codes[id * 32u + k / 16u] >> (2u * (k % 16u))) & 3u);
-  let sc = scales[id * 4u + k / 128u];
+  let q = f32((codes[id * (D / 16u) + k / 16u] >> (2u * (k % 16u))) & 3u);
+  let sc = scales[id * (D / 128u) + k / 128u];
   x[i] = q * sc + (-sc);
 }`;
-var RMSNORM = HEADER + `
+  const RMSNORM = HEADER + `
 @group(0) @binding(0) var<uniform> g: G;
 @group(0) @binding(1) var<storage, read> x: array<f32>;
 @group(0) @binding(2) var<storage, read> w: array<f32>;
@@ -905,7 +1121,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
   let inv = inverseSqrt(red[0] / f32(D) + 1e-6);
   for (var k = lid; k < D; k += 64u) { y[r * D + k] = x[r * D + k] * inv * w[k]; }
 }`;
-var ROPE_KV = HEADER + `
+  const ROPE_KV = HEADER + `
 @group(0) @binding(0) var<uniform> g: G;
 @group(0) @binding(1) var<storage, read_write> qkv: array<f32>;
 @group(0) @binding(2) var<storage, read> rope: array<f32>;
@@ -914,24 +1130,24 @@ var ROPE_KV = HEADER + `
 @compute @workgroup_size(256)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;                      // (row, head, pair)
-  if (i >= g.rows * 256u) { return; }
-  let r = i / 256u; let hp = i % 256u;
+  if (i >= g.rows * HP) { return; }
+  let r = i / HP; let hp = i % HP;
   let hh = hp / 32u; let p = hp % 32u;
   let pos = g.offset + r;
   let cs = rope[(pos * 32u + p) * 2u];
   let sn = rope[(pos * 32u + p) * 2u + 1u];
-  let at = r * 1536u + hh * 64u + 2u * p;
+  let at = r * QKV + hh * 64u + 2u * p;
   let q0 = qkv[at]; let q1 = qkv[at + 1u];
   qkv[at] = q0 * cs - q1 * sn;
   qkv[at + 1u] = q0 * sn + q1 * cs;
-  let k0 = qkv[at + 512u]; let k1 = qkv[at + 513u];
+  let k0 = qkv[at + D]; let k1 = qkv[at + D + 1u];
   let c = pos * D + hh * 64u + 2u * p;
   kc[c] = k0 * cs - k1 * sn;
   kc[c + 1u] = k0 * sn + k1 * cs;
-  vc[c] = qkv[at + 1024u];
-  vc[c + 1u] = qkv[at + 1025u];
+  vc[c] = qkv[at + 2u * D];
+  vc[c + 1u] = qkv[at + 2u * D + 1u];
 }`;
-var ATTN = HEADER + `
+  const ATTN = HEADER + `
 @group(0) @binding(0) var<uniform> g: G;
 @group(0) @binding(1) var<uniform> s: S;
 @group(0) @binding(2) var<storage, read> qkv: array<f32>;
@@ -954,7 +1170,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
   }
   if (workgroupUniformLoad(&gateOpen) == 0u) { return; }
   var q = array<f32, 64>();
-  for (var d = 0u; d < 64u; d++) { q[d] = qkv[r * 1536u + hh * 64u + d] * 0.125; }
+  for (var d = 0u; d < 64u; d++) { q[d] = qkv[r * QKV + hh * 64u + d] * 0.125; }
   var m = -3.0e38; var l = 0.0;
   var acc = array<f32, 64>();
   let n = g.offset + r + 1u;
@@ -981,7 +1197,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
     att[r * D + hh * 64u + d] = num / den;
   }
 }`;
-var ADAPTER = HEADER + `
+  const ADAPTER = HEADER + `
 @group(0) @binding(0) var<uniform> g: G;
 @group(0) @binding(1) var<storage, read> h: array<f32>;
 @group(0) @binding(2) var<storage, read> x: array<f32>;
@@ -999,7 +1215,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
   if (r0 >= g.rows) { return; }
   let o = wid.x * 64u + lid;
   var acc = array<f32, 8>();
-  for (var c = 0u; c < 8u; c++) {          // 8 chunks of 128 over 1024 inputs
+  for (var c = 0u; c < (2u * D) / 128u; c++) {          // chunks of 128 over the 2 * D inputs
     for (var i = lid; i < 1024u; i += 64u) {
       let rr = r0 + i / 128u;
       let k = c * 128u + i % 128u;
@@ -1009,7 +1225,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
     }
     workgroupBarrier();
     for (var k = 0u; k < 128u; k++) {
-      let wv = w[o * 1024u + c * 128u + k];
+      let wv = w[o * 2u * D + c * 128u + k];
       for (var rr = 0u; rr < 8u; rr++) { acc[rr] += wv * xs[rr * 128u + k]; }
     }
     workgroupBarrier();
@@ -1019,7 +1235,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
     if (r < g.rows) { u[r * D + o] = acc[rr]; }
   }
 }`;
-var ROUTER = HEADER + `
+  const ROUTER = HEADER + `
 @group(0) @binding(0) var<uniform> g: G;
 @group(0) @binding(1) var<uniform> s: S;
 @group(0) @binding(2) var<storage, read> a: array<f32>;
@@ -1028,8 +1244,8 @@ var ROUTER = HEADER + `
 @group(0) @binding(5) var<storage, read_write> logits: array<f32>;
 @group(0) @binding(6) var<storage, read_write> st: array<atomic<u32>>;
 var<workgroup> gateOpen: u32;
-var<workgroup> z: array<f32, 32>;
-@compute @workgroup_size(32)
+var<workgroup> z: array<f32, NE>;
+@compute @workgroup_size(NE)
 fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid3: vec3<u32>) {
   let e = lid3.x;
   let r = wid.x;
@@ -1042,21 +1258,21 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
   var t = 0.0;
   for (var k = 0u; k < D; k++) { t += (a[r * D + k] + depth[k]) * w[e * D + k]; }
   z[e] = t;
-  logits[r * 32u + e] = t;
+  logits[r * NE + e] = t;
   workgroupBarrier();
   if (e == 0u) {
-    var taken = 0u;
+    var taken = array<u32, MW>();
     for (var n = 0u; n < g.topk; n++) {
       var best = 0u; var bv = -3.0e38;
-      for (var j = 0u; j < 32u; j++) {
-        if ((taken & (1u << j)) == 0u && z[j] > bv) { bv = z[j]; best = j; }
+      for (var j = 0u; j < NE; j++) {
+        if ((taken[j >> 5u] & (1u << (j & 31u))) == 0u && z[j] > bv) { bv = z[j]; best = j; }
       }
-      taken |= 1u << best;
+      taken[best >> 5u] |= 1u << (best & 31u);
     }
-    atomicOr(&st[REQ], taken);
+    for (var i = 0u; i < MW; i++) { atomicOr(&st[REQ + i], taken[i]); }
   }
 }`;
-var ADMIT = HEADER + `
+  const ADMIT = HEADER + `
 @group(0) @binding(0) var<uniform> s: S;
 @group(0) @binding(1) var<storage, read_write> st: array<u32>;
 @group(0) @binding(2) var<uniform> g: G;
@@ -1064,20 +1280,27 @@ var ADMIT = HEADER + `
 fn main() {
   let nact = st[s.gate];
   if (nact == 0u) { return; }
-  let req = st[REQ];
-  st[REQ] = 0u;
   if (s.first != 0u) {
-    st[VOTE] = st[VOTE] | req;
-    st[ADMITTED] = st[VOTE];
-  } else if (st[ADMITTED] != 0xffffffffu) {
-    st[ADMITTED] = st[ADMITTED] | req;
+    for (var i = 0u; i < MW; i++) {
+      st[VOTE + i] = st[VOTE + i] | st[REQ + i];
+      st[ADMITTED + i] = st[VOTE + i];
+    }
+  } else {
+    var held = 0u;
+    for (var i = 0u; i < MW; i++) { held += countOneBits(st[ADMITTED + i]); }
+    if (held != NE) {
+      for (var i = 0u; i < MW; i++) { st[ADMITTED + i] = st[ADMITTED + i] | st[REQ + i]; }
+    }
   }
-  let k = min(g.topk, countOneBits(st[ADMITTED]));
+  for (var i = 0u; i < MW; i++) { st[REQ + i] = 0u; }
+  var admitted = 0u;
+  for (var i = 0u; i < MW; i++) { admitted += countOneBits(st[ADMITTED + i]); }
+  let k = min(g.topk, admitted);
   st[K] = k;
   let m = nact * k;
-  st[BOUND] = max(1u, u32(ceil(s.cf * f32(m) / 32.0)));
+  st[BOUND] = max(1u, u32(ceil(s.cf * f32(m) / f32(NE))));
 }`;
-var ROUTE = HEADER + `
+  const ROUTE = HEADER + `
 @group(0) @binding(0) var<uniform> g: G;
 @group(0) @binding(1) var<uniform> s: S;
 @group(0) @binding(2) var<storage, read> logits: array<f32>;
@@ -1088,42 +1311,43 @@ var ROUTE = HEADER + `
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let r = gid.x;
   if (st[s.gate] == 0u || r >= g.rows || st[HALTED + r] != 0u) { return; }
-  let adm = st[ADMITTED];
+  var adm = array<u32, MW>();
+  for (var i = 0u; i < MW; i++) { adm[i] = st[ADMITTED + i]; }
   let k = st[K];
   var mx = -3.0e38;
-  for (var e = 0u; e < 32u; e++) {
-    if ((adm & (1u << e)) != 0u) { mx = max(mx, logits[r * 32u + e]); }
+  for (var e = 0u; e < NE; e++) {
+    if ((adm[e >> 5u] & (1u << (e & 31u))) != 0u) { mx = max(mx, logits[r * NE + e]); }
   }
   var zsum = 0.0;
-  for (var e = 0u; e < 32u; e++) {
-    if ((adm & (1u << e)) != 0u) { zsum += exp(logits[r * 32u + e] - mx); }
+  for (var e = 0u; e < NE; e++) {
+    if ((adm[e >> 5u] & (1u << (e & 31u))) != 0u) { zsum += exp(logits[r * NE + e] - mx); }
   }
-  var taken = 0u;
-  var ids = array<u32, 32>();
-  var ps = array<f32, 32>();
+  var taken = array<u32, MW>();
+  var ids = array<u32, SL>();
+  var ps = array<f32, SL>();
   var psum = 0.0;
   for (var n = 0u; n < k; n++) {
     var best = 0u; var bv = -3.0e38;
-    for (var e = 0u; e < 32u; e++) {
-      let ok = (adm & (1u << e)) != 0u && (taken & (1u << e)) == 0u;
-      if (ok && logits[r * 32u + e] > bv) { bv = logits[r * 32u + e]; best = e; }
+    for (var e = 0u; e < NE; e++) {
+      let ok = (adm[e >> 5u] & (1u << (e & 31u))) != 0u && (taken[e >> 5u] & (1u << (e & 31u))) == 0u;
+      if (ok && logits[r * NE + e] > bv) { bv = logits[r * NE + e]; best = e; }
     }
-    taken |= 1u << best;
+    taken[best >> 5u] |= 1u << (best & 31u);
     ids[n] = best;
     ps[n] = exp(bv - mx) / zsum;
     psum += ps[n];
   }
-  for (var n = 0u; n < 32u; n++) {
-    route[r * 96u + n] = ids[n];
-    route[r * 96u + 32u + n] = bitcast<u32>(select(0.0, ps[n] / psum * gate[ids[n]], n < k));
+  for (var n = 0u; n < SL; n++) {
+    route[r * RS + n] = ids[n];
+    route[r * RS + SL + n] = bitcast<u32>(select(0.0, ps[n] / psum * gate[ids[n]], n < k));
   }
 }`;
-var CAPACITY = HEADER + `
+  const CAPACITY = HEADER + `
 @group(0) @binding(0) var<uniform> g: G;
 @group(0) @binding(1) var<uniform> s: S;
 @group(0) @binding(2) var<storage, read_write> route: array<u32>;
 @group(0) @binding(3) var<storage, read> st: array<u32>;
-@compute @workgroup_size(32)
+@compute @workgroup_size(NE)
 fn main(@builtin(local_invocation_id) lid3: vec3<u32>) {
   let e = lid3.x;
   if (st[s.gate] == 0u) { return; }
@@ -1132,14 +1356,14 @@ fn main(@builtin(local_invocation_id) lid3: vec3<u32>) {
   for (var r = 0u; r < g.rows; r++) {
     if (st[HALTED + r] != 0u) { continue; }
     for (var j = 0u; j < k; j++) {
-      if (route[r * 96u + j] == e) {
-        route[r * 96u + 64u + j] = select(0u, 1u, count < bound);
+      if (route[r * RS + j] == e) {
+        route[r * RS + 2u * SL + j] = select(0u, 1u, count < bound);
         count++;
       }
     }
   }
 }`;
-var EXPERT13 = HEADER + `
+  const EXPERT13 = HEADER + `
 @group(0) @binding(0) var<uniform> g: G;
 @group(0) @binding(1) var<uniform> s: S;
 @group(0) @binding(2) var<storage, read> a: array<f32>;
@@ -1156,23 +1380,23 @@ var<workgroup> xsum: f32;
 @compute @workgroup_size(64)
 fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid3: vec3<u32>) {
   let lid = lid3.x;
-  let p = wid.y; let r = p / 32u; let j = p % 32u;
+  let p = wid.y; let r = p / SL; let j = p % SL;
   if (lid == 0u) {
     var open = st[s.gate];
-    if (r >= g.rows || st[HALTED + r] != 0u || j >= st[K] || route[r * 96u + 64u + j] == 0u) { open = 0u; }
+    if (r >= g.rows || st[HALTED + r] != 0u || j >= st[K] || route[r * RS + 2u * SL + j] == 0u) { open = 0u; }
     gateOpen = open;
   }
   if (workgroupUniformLoad(&gateOpen) == 0u) { return; }
-  let e = route[r * 96u + j];
-  let o = wid.x * 64u + lid;               // of 2048
+  let e = route[r * RS + j];
+  let o = wid.x * 64u + lid;               // of EFF
   var a1 = 0.0; var a3 = 0.0;
-  for (var gi = 0u; gi < 4u; gi++) {
+  for (var gi = 0u; gi < D / 128u; gi++) {
     for (var i = lid; i < 128u; i += 64u) { xs[i] = a[r * D + gi * 128u + i]; }
     workgroupBarrier();
     if (lid == 0u) { var t = 0.0; for (var k = 0u; k < 128u; k++) { t += xs[k]; } xsum = t; }
     workgroupBarrier();
     var p1 = 0.0; var p3 = 0.0;
-    let wbase = (e * 2048u + o) * 32u + gi * 8u;
+    let wbase = (e * EFF + o) * (D / 16u) + gi * 8u;
     for (var w = 0u; w < 8u; w++) {
       let w1 = c1[wbase + w]; let w3 = c3[wbase + w];
       for (var c = 0u; c < 16u; c++) {
@@ -1181,14 +1405,14 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
         p3 += f32((w3 >> (2u * c)) & 3u) * xv;
       }
     }
-    let gs = (e * 2048u + o) * 4u + gi;
+    let gs = (e * EFF + o) * (D / 128u) + gi;
     a1 += s1[gs] * p1 - s1[gs] * xsum;
     a3 += s3[gs] * p3 - s3[gs] * xsum;
     workgroupBarrier();
   }
-  eh[p * 2048u + o] = (a1 / (1.0 + exp(-a1))) * a3;
+  eh[p * EFF + o] = (a1 / (1.0 + exp(-a1))) * a3;
 }`;
-var EXPERT2 = HEADER + `
+  const EXPERT2 = HEADER + `
 @group(0) @binding(0) var<uniform> g: G;
 @group(0) @binding(1) var<uniform> s: S;
 @group(0) @binding(2) var<storage, read> eh: array<f32>;
@@ -1203,35 +1427,35 @@ var<workgroup> xsum: f32;
 @compute @workgroup_size(64)
 fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid3: vec3<u32>) {
   let lid = lid3.x;
-  let p = wid.y; let r = p / 32u; let j = p % 32u;
+  let p = wid.y; let r = p / SL; let j = p % SL;
   if (lid == 0u) {
     var open = st[s.gate];
-    if (r >= g.rows || st[HALTED + r] != 0u || j >= st[K] || route[r * 96u + 64u + j] == 0u) { open = 0u; }
+    if (r >= g.rows || st[HALTED + r] != 0u || j >= st[K] || route[r * RS + 2u * SL + j] == 0u) { open = 0u; }
     gateOpen = open;
   }
   if (workgroupUniformLoad(&gateOpen) == 0u) { return; }
-  let o = wid.x * 64u + lid;               // of 512
-  let e = route[r * 96u + j];
-  let wt = bitcast<f32>(route[r * 96u + 32u + j]);
+  let o = wid.x * 64u + lid;               // of D
+  let e = route[r * RS + j];
+  let wt = bitcast<f32>(route[r * RS + SL + j]);
   var acc = 0.0;
-  for (var gi = 0u; gi < 16u; gi++) {
-    for (var i = lid; i < 128u; i += 64u) { xs[i] = eh[p * 2048u + gi * 128u + i]; }
+  for (var gi = 0u; gi < EFF / 128u; gi++) {
+    for (var i = lid; i < 128u; i += 64u) { xs[i] = eh[p * EFF + gi * 128u + i]; }
     workgroupBarrier();
     if (lid == 0u) { var t = 0.0; for (var q = 0u; q < 128u; q++) { t += xs[q]; } xsum = t; }
     workgroupBarrier();
     var part = 0.0;
-    let wbase = (e * 512u + o) * 128u + gi * 8u;
+    let wbase = (e * D + o) * (EFF / 16u) + gi * 8u;
     for (var w = 0u; w < 8u; w++) {
       let word = c2[wbase + w];
       for (var c = 0u; c < 16u; c++) { part += f32((word >> (2u * c)) & 3u) * xs[w * 16u + c]; }
     }
-    let sc = s2[(e * 512u + o) * 16u + gi];
+    let sc = s2[(e * D + o) * (EFF / 128u) + gi];
     acc += sc * part - sc * xsum;
     workgroupBarrier();
   }
-  ep[p * 512u + o] = acc * wt;
+  ep[p * D + o] = acc * wt;
 }`;
-var EXPERT_SUM = HEADER + `
+  const EXPERT_SUM = HEADER + `
 @group(0) @binding(0) var<uniform> g: G;
 @group(0) @binding(1) var<uniform> s: S;
 @group(0) @binding(2) var<storage, read> ep: array<f32>;
@@ -1239,7 +1463,6 @@ var EXPERT_SUM = HEADER + `
 @group(0) @binding(4) var<storage, read> x1: array<f32>;
 @group(0) @binding(5) var<storage, read_write> h: array<f32>;
 @group(0) @binding(6) var<storage, read> st: array<u32>;
-var<workgroup> keptW: u32;
 var<workgroup> gateOpen: u32;
 @compute @workgroup_size(64)
 fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid3: vec3<u32>) {
@@ -1249,22 +1472,17 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
     var open = st[s.gate];
     if (r >= g.rows || st[HALTED + r] != 0u) { open = 0u; }
     gateOpen = open;
-    var kept = 0u;
-    if (open != 0u) {
-      for (var j = 0u; j < st[K]; j++) { kept |= route[r * 96u + 64u + j] << j; }
-    }
-    keptW = kept;
   }
   if (workgroupUniformLoad(&gateOpen) == 0u) { return; }
-  let kept = workgroupUniformLoad(&keptW);
+  let k = st[K];
   let o = wid.x * 64u + lid;
   var total = 0.0;
-  for (var j = 0u; j < 32u; j++) {
-    if ((kept & (1u << j)) != 0u) { total += ep[(r * 32u + j) * 512u + o]; }
+  for (var j = 0u; j < SL; j++) {
+    if (j < k && route[r * RS + 2u * SL + j] != 0u) { total += ep[(r * SL + j) * D + o]; }
   }
   h[r * D + o] = x1[r * D + o] + total;
 }`;
-var EXIT = HEADER + `
+  const EXIT = HEADER + `
 @group(0) @binding(0) var<uniform> g: G;
 @group(0) @binding(1) var<uniform> s: S;
 @group(0) @binding(2) var<storage, read> h: array<f32>;
@@ -1323,7 +1541,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
     }
   }
 }`;
-var INIT = HEADER + `
+  const INIT = HEADER + `
 @group(0) @binding(0) var<uniform> g: G;
 @group(0) @binding(1) var<storage, read_write> h: array<f32>;
 @group(0) @binding(2) var<storage, read_write> st: array<u32>;
@@ -1333,9 +1551,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (i < g.rows * D) { h[i] = 0.0; }
   if (i < g.rows) { st[HALTED + i] = 0u; st[CUM + i] = bitcast<u32>(1.0); }
   if (i < 32u) { st[COUNT + i] = 0u; st[NEWLY + i] = 0u; }
-  if (i == 0u) { st[COUNT] = g.rows; st[ADMITTED] = 0u; st[REQ] = 0u; st[STEPS] = 0u; }
+  if (i < MW) { st[ADMITTED + i] = 0u; st[REQ + i] = 0u; }
+  if (i == 0u) { st[COUNT] = g.rows; st[STEPS] = 0u; }
 }`;
-var QMM1 = HEADER + `
+  const QMM1 = HEADER + `
 @group(0) @binding(0) var<uniform> g: G;
 @group(0) @binding(1) var<uniform> s: S;
 @group(0) @binding(2) var<storage, read> x: array<f32>;
@@ -1346,8 +1565,8 @@ var QMM1 = HEADER + `
 @group(0) @binding(7) var<storage, read> st: array<u32>;
 @group(0) @binding(8) var<uniform> hasBase: vec4<u32>;
 ${GATE}
-var<workgroup> xs: array<f32, 1408>;
-var<workgroup> xsum: array<f32, 11>;
+var<workgroup> xs: array<f32, MAXIN>;
+var<workgroup> xsum: array<f32, MAXIN / 128u>;
 var<workgroup> red: array<f32, 64>;
 @compute @workgroup_size(64)
 fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid3: vec3<u32>) {
@@ -1378,7 +1597,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
     y[o] = select(0.0, base[o], hasBase.x != 0u) + t;
   }
 }`;
-var ADAPTER1 = HEADER + `
+  const ADAPTER1 = HEADER + `
 @group(0) @binding(0) var<uniform> g: G;
 @group(0) @binding(1) var<storage, read> h: array<f32>;
 @group(0) @binding(2) var<storage, read> x: array<f32>;
@@ -1387,21 +1606,21 @@ var ADAPTER1 = HEADER + `
 @group(0) @binding(5) var<uniform> s: S;
 @group(0) @binding(6) var<storage, read> st: array<u32>;
 ${GATE}
-var<workgroup> xs: array<vec4<f32>, 256>;
+var<workgroup> xs: array<vec4<f32>, D / 2u>;
 var<workgroup> red: array<f32, 64>;
 @compute @workgroup_size(64)
 fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid3: vec3<u32>) {
   let lid = lid3.x;
   if (gateClosed(lid)) { return; }
   _ = g.rows;
-  for (var i = lid; i < 256u; i += 64u) {
+  for (var i = lid; i < D / 2u; i += 64u) {
     let k = i * 4u;
     xs[i] = select(vec4(x[k - D], x[k + 1u - D], x[k + 2u - D], x[k + 3u - D]), vec4(h[k], h[k + 1u], h[k + 2u], h[k + 3u]), k < D);
   }
   workgroupBarrier();
   let oo = lid / 8u; let lane = lid % 8u; let o = wid.x * 8u + oo;
   var acc = 0.0;
-  for (var i = lane; i < 256u; i += 8u) { acc += dot(w[o * 256u + i], xs[i]); }
+  for (var i = lane; i < D / 2u; i += 8u) { acc += dot(w[o * (D / 2u) + i], xs[i]); }
   red[lid] = acc;
   workgroupBarrier();
   if (lane == 0u) {
@@ -1410,11 +1629,11 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
     u[o] = t;
   }
 }`;
-var GCLEAR = HEADER + `
+  const GCLEAR = HEADER + `
 @group(0) @binding(0) var<storage, read_write> grp: array<u32>;
-@compute @workgroup_size(32)
+@compute @workgroup_size(NE)
 fn main(@builtin(local_invocation_id) lid3: vec3<u32>) { grp[lid3.x] = 0u; }`;
-var GROUP = HEADER + `
+  const GROUP = HEADER + `
 @group(0) @binding(0) var<uniform> g: G;
 @group(0) @binding(1) var<uniform> s: S;
 @group(0) @binding(2) var<storage, read> route: array<u32>;
@@ -1422,13 +1641,13 @@ var GROUP = HEADER + `
 @group(0) @binding(4) var<storage, read_write> grp: array<atomic<u32>>;
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let p = gid.x; let r = p / 32u; let j = p % 32u;
-  if (st[s.gate] == 0u || r >= g.rows || st[HALTED + r] != 0u || j >= st[K] || route[r * 96u + 64u + j] == 0u) { return; }
-  let e = route[r * 96u + j];
+  let p = gid.x; let r = p / SL; let j = p % SL;
+  if (st[s.gate] == 0u || r >= g.rows || st[HALTED + r] != 0u || j >= st[K] || route[r * RS + 2u * SL + j] == 0u) { return; }
+  let e = route[r * RS + j];
   let i = atomicAdd(&grp[e], 1u);
-  atomicStore(&grp[32u + e * 512u + i], p);
+  atomicStore(&grp[NE + e * 512u + i], p);
 }`;
-var EXPERT13G = HEADER + `
+  const EXPERT13G = HEADER + `
 @group(0) @binding(0) var<uniform> g: G;
 @group(0) @binding(1) var<storage, read> a: array<f32>;
 @group(0) @binding(2) var<storage, read> c1: array<u32>;
@@ -1449,14 +1668,14 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
   let n = workgroupUniformLoad(&nW);
   if (t0 >= n) { return; }
   let m = min(8u, n - t0);
-  let oA = wid.x * 128u + lid; let oB = oA + 64u;          // of 2048
+  let oA = wid.x * 128u + lid; let oB = oA + 64u;          // of EFF
   var a1A = array<f32, 8>(); var a3A = array<f32, 8>();
   var a1B = array<f32, 8>(); var a3B = array<f32, 8>();
-  for (var gi = 0u; gi < 4u; gi++) {
+  for (var gi = 0u; gi < D / 128u; gi++) {
     for (var i = lid; i < 1024u; i += 64u) {
       let k = i / 128u;
       var v = 0.0;
-      if (k < m) { v = a[(grp[32u + e * 512u + t0 + k] / 32u) * D + gi * 128u + i % 128u]; }
+      if (k < m) { v = a[(grp[NE + e * 512u + t0 + k] / SL) * D + gi * 128u + i % 128u]; }
       xs[i] = v;
     }
     workgroupBarrier();
@@ -1464,7 +1683,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
     workgroupBarrier();
     var p1A = array<f32, 8>(); var p3A = array<f32, 8>();
     var p1B = array<f32, 8>(); var p3B = array<f32, 8>();
-    let wA = (e * 2048u + oA) * 32u + gi * 8u; let wB = (e * 2048u + oB) * 32u + gi * 8u;
+    let wA = (e * EFF + oA) * (D / 16u) + gi * 8u; let wB = (e * EFF + oB) * (D / 16u) + gi * 8u;
     for (var w = 0u; w < 8u; w++) {
       let w1A = c1[wA + w]; let w3A = c3[wA + w]; let w1B = c1[wB + w]; let w3B = c3[wB + w];
       for (var c = 0u; c < 16u; c++) {
@@ -1478,7 +1697,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
         }
       }
     }
-    let gA = (e * 2048u + oA) * 4u + gi; let gB = (e * 2048u + oB) * 4u + gi;
+    let gA = (e * EFF + oA) * (D / 128u) + gi; let gB = (e * EFF + oB) * (D / 128u) + gi;
     for (var k = 0u; k < 8u; k++) {
       a1A[k] += s1[gA] * p1A[k] - s1[gA] * xsum[k];
       a3A[k] += s3[gA] * p3A[k] - s3[gA] * xsum[k];
@@ -1488,12 +1707,12 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
     workgroupBarrier();
   }
   for (var k = 0u; k < m; k++) {
-    let p = grp[32u + e * 512u + t0 + k];
-    eh[p * 2048u + oA] = (a1A[k] / (1.0 + exp(-a1A[k]))) * a3A[k];
-    eh[p * 2048u + oB] = (a1B[k] / (1.0 + exp(-a1B[k]))) * a3B[k];
+    let p = grp[NE + e * 512u + t0 + k];
+    eh[p * EFF + oA] = (a1A[k] / (1.0 + exp(-a1A[k]))) * a3A[k];
+    eh[p * EFF + oB] = (a1B[k] / (1.0 + exp(-a1B[k]))) * a3B[k];
   }
 }`;
-var EXPERT2G = HEADER + `
+  const EXPERT2G = HEADER + `
 @group(0) @binding(0) var<uniform> g: G;
 @group(0) @binding(1) var<storage, read> eh: array<f32>;
 @group(0) @binding(2) var<storage, read> c2: array<u32>;
@@ -1513,13 +1732,13 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
   let n = workgroupUniformLoad(&nW);
   if (t0 >= n) { return; }
   let m = min(8u, n - t0);
-  let o0 = wid.x * 256u + lid;             // and o0 + 64, + 128, + 192, of 512
+  let o0 = wid.x * 256u + lid;             // and o0 + 64, + 128, + 192, of D
   var acc = array<array<f32, 8>, 4>();
-  for (var gi = 0u; gi < 16u; gi++) {
+  for (var gi = 0u; gi < EFF / 128u; gi++) {
     for (var i = lid; i < 1024u; i += 64u) {
       let k = i / 128u;
       var v = 0.0;
-      if (k < m) { v = eh[grp[32u + e * 512u + t0 + k] * 2048u + gi * 128u + i % 128u]; }
+      if (k < m) { v = eh[grp[NE + e * 512u + t0 + k] * EFF + gi * 128u + i % 128u]; }
       xs[i] = v;
     }
     workgroupBarrier();
@@ -1528,7 +1747,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
     var part = array<array<f32, 8>, 4>();
     for (var w = 0u; w < 8u; w++) {
       var word = array<u32, 4>();
-      for (var j = 0u; j < 4u; j++) { word[j] = c2[(e * 512u + o0 + 64u * j) * 128u + gi * 8u + w]; }
+      for (var j = 0u; j < 4u; j++) { word[j] = c2[(e * D + o0 + 64u * j) * (EFF / 16u) + gi * 8u + w]; }
       for (var c = 0u; c < 16u; c++) {
         let sh = 2u * c;
         var q = array<f32, 4>();
@@ -1540,19 +1759,19 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
       }
     }
     for (var j = 0u; j < 4u; j++) {
-      let sc = s2[(e * 512u + o0 + 64u * j) * 16u + gi];
+      let sc = s2[(e * D + o0 + 64u * j) * (EFF / 128u) + gi];
       for (var k = 0u; k < 8u; k++) { acc[j][k] += sc * part[j][k] - sc * xsum[k]; }
     }
     workgroupBarrier();
   }
   for (var k = 0u; k < m; k++) {
-    let p = grp[32u + e * 512u + t0 + k];
-    let r = p / 32u; let jj = p % 32u;
-    let wt = bitcast<f32>(route[r * 96u + 32u + jj]);
-    for (var j = 0u; j < 4u; j++) { ep[p * 512u + o0 + 64u * j] = acc[j][k] * wt; }
+    let p = grp[NE + e * 512u + t0 + k];
+    let r = p / SL; let jj = p % SL;
+    let wt = bitcast<f32>(route[r * RS + SL + jj]);
+    for (var j = 0u; j < 4u; j++) { ep[p * D + o0 + 64u * j] = acc[j][k] * wt; }
   }
 }`;
-var ATTN1P = HEADER + `
+  const ATTN1P = HEADER + `
 @group(0) @binding(0) var<uniform> g: G;
 @group(0) @binding(1) var<uniform> s: S;
 @group(0) @binding(2) var<storage, read> qkv: array<f32>;
@@ -1602,11 +1821,11 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
   let cnt = min(64u, n - j0);
   var acc = 0.0;
   for (var u = 0u; u < cnt; u++) { acc += ps[u] * vc[(j0 + u) * D + hh * 64u + t]; }
-  let o = (hh * 32u + c) * 66u;
+  let o = (hh * CH + c) * 66u;
   if (t == 0u) { part[o] = m; part[o + 1u] = red[0]; }
   part[o + 2u + t] = acc;
 }`;
-var ATTN1M = HEADER + `
+  const ATTN1M = HEADER + `
 @group(0) @binding(0) var<uniform> g: G;
 @group(0) @binding(1) var<uniform> s: S;
 @group(0) @binding(2) var<storage, read> part: array<f32>;
@@ -1624,24 +1843,24 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid
   if (workgroupUniformLoad(&gateOpen) == 0u) { return; }
   let chunks = (g.offset + 1u + 63u) / 64u;
   var mx = -3.0e38;
-  for (var c = 0u; c < chunks; c++) { mx = max(mx, part[(hh * 32u + c) * 66u]); }
+  for (var c = 0u; c < chunks; c++) { mx = max(mx, part[(hh * CH + c) * 66u]); }
   var den = 0.0; var num = 0.0;
   for (var c = 0u; c < chunks; c++) {
-    let o = (hh * 32u + c) * 66u;
+    let o = (hh * CH + c) * 66u;
     let f = exp(part[o] - mx);
     den += part[o + 1u] * f;
     num += part[o + 2u + t] * f;
   }
   att[hh * 64u + t] = num / den;
 }`;
-var TRACE = HEADER + `
+  const TRACE = HEADER + `
 @group(0) @binding(0) var<storage, read> hist: array<u32>;
 @group(0) @binding(1) var<storage, read> tr: array<f32>;      // decay^0..63, then strength
 @group(0) @binding(2) var<storage, read_write> pen: array<f32>;
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
-  if (i >= 265u) { return; }
+  if (i >= VOC) { return; }
   let cnt = hist[0]; let n = min(64u, cnt);
   var t = 0.0;
   for (var k = 0u; k < n; k++) {
@@ -1649,7 +1868,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
   pen[i] = tr[64] * t;
 }`;
-var PICK = HEADER + `
+  const PICK = HEADER + `
 @group(0) @binding(0) var<storage, read> logits: array<f32>;
 @group(0) @binding(1) var<storage, read> pen: array<f32>;
 @group(0) @binding(2) var<storage, read_write> hist: array<u32>;
@@ -1659,7 +1878,7 @@ var PICK = HEADER + `
 @compute @workgroup_size(1)
 fn main() {
   var best = 0u; var bv = logits[0] - pen[0];
-  for (var i = 1u; i < 265u; i++) {
+  for (var i = 1u; i < VOC; i++) {
     let v = logits[i] - pen[i];
     if (v > bv) { best = i; bv = v; }
   }
@@ -1671,28 +1890,12 @@ fn main() {
   hist[0] = cnt + 1u;
   ids[0] = best;
 }`;
-
-// web/engine.js
-var D = 512;
-var HEADS = 8;
-var QKV = 1536;
-var MAX_ROWS = 512;
-var SLOTS_PRE = 2;
-var NONE = 4294967295;
-var ST = { STEPS: 5, COUNT: 16, NEWLY: 48, HALTED: 1024, CUM: 2048, WORDS: 4096 };
-function parseSafetensors(buf) {
-  const n = Number(new DataView(buf).getBigUint64(0, true));
-  const header = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 8, n)));
-  const start = 8 + n;
-  const out = {};
-  for (const [name, t] of Object.entries(header)) {
-    if (name === "__metadata__")
-      continue;
-    const [a, b] = t.data_offsets;
-    out[name] = { dtype: t.dtype, shape: t.shape, bytes: new Uint8Array(buf, start + a, b - a) };
-  }
-  return { tensors: out, metadata: header.__metadata__ ?? {} };
+  return { QMM, QMM2, EMBED, RMSNORM, ROPE_KV, ATTN, ADAPTER, ROUTER, ADMIT, ROUTE, CAPACITY, EXPERT13, EXPERT2, EXPERT_SUM, EXIT, INIT, QMM1, ADAPTER1, GCLEAR, GROUP, EXPERT13G, EXPERT2G, ATTN1P, ATTN1M, TRACE, PICK };
 }
+
+// lib/nirca-webgpu/src/engine.js
+var MAX_ROWS = 512;
+var NONE = 4294967295;
 function f16ToF32(bytes) {
   const u = new Uint16Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
   const out = new Float32Array(u.length);
@@ -1704,41 +1907,6 @@ function f16ToF32(bytes) {
 }
 function f32(bytes) {
   return new Float32Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
-}
-function shapeOf(manifest) {
-  const c = manifest.cfg;
-  const want = {
-    d_model: 512,
-    n_head: 8,
-    n_prelude: 2,
-    n_recur: 1,
-    n_coda: 0,
-    pool_d_ff: 2048,
-    pool_top_k: 8,
-    d_ff: 1408,
-    vocab_size: 265,
-    tie_embeddings: true,
-    halt_freeze: true
-  };
-  for (const [k, v] of Object.entries(want)) {
-    if (c[k] !== v)
-      throw new Error(`this engine is built for ${k} = ${v}; the save has ${c[k]}`);
-  }
-  if (manifest.quant !== "ternary" || manifest.quant_scope !== "all") {
-    throw new Error(`this engine reads ternary weights (scope all), not ${manifest.quant} (${manifest.quant_scope})`);
-  }
-  if (manifest.n_experts !== 32 || c.pool_resident < 32) {
-    throw new Error(`this engine is built for 32 experts, all admitted; the save has ${manifest.n_experts}, resident ${c.pool_resident}`);
-  }
-  if ((c.min_steps ?? 1) !== 1)
-    throw new Error(`min_steps ${c.min_steps} is not ported`);
-  return {
-    block: c.block,
-    maxSteps: c.max_steps,
-    cf: c.pool_capacity_factor ?? 1.5,
-    haltThresh: c.halt_thresh,
-    theta: c.rope_theta
-  };
 }
 function ropeTable(block, theta) {
   const t = new Float32Array(block * 32 * 2);
@@ -1753,30 +1921,109 @@ function ropeTable(block, theta) {
   }
   return t;
 }
+var pad16 = (n) => Math.ceil(n / 16) * 16;
+function deviceNeeds(shape) {
+  const R = MAX_ROWS, { d, ff, expertFf, vocab, experts, slots, block, heads } = shape;
+  const bytes = {
+    "expert hidden": R * slots * expertFf * 4,
+    "expert out": R * slots * d * 4,
+    qkv: R * 3 * d * 4,
+    "ffn hidden": R * ff * 4,
+    "expert weights": experts * expertFf * (d / 16) * 4,
+    "kv cache": block * d * 4,
+    "expert groups": (experts + experts * R) * 4,
+    "attention partials": heads * Math.ceil(block / 64) * 66 * 4,
+    embedding: vocab * (d / 16) * 4,
+    adapter: d * 2 * d * 4
+  };
+  const biggest = Math.max(...Object.values(bytes));
+  const maxIn = Math.max(d, ff);
+  return {
+    maxStorageBufferBindingSize: biggest,
+    maxBufferSize: biggest,
+    maxComputeWorkgroupStorageSize: Math.max((maxIn + maxIn / 128 + 64) * 4, 1032 * 4 + 4, 8192 + 128 * 4 + 32),
+    maxComputeInvocationsPerWorkgroup: Math.max(64, experts),
+    maxComputeWorkgroupsPerDimension: R * slots
+  };
+}
+function checkDevice(limits, shape) {
+  for (const [limit, needed] of Object.entries(deviceNeeds(shape))) {
+    if (!(limits[limit] >= needed))
+      throw new DeviceTooSmall(limit, needed, limits[limit]);
+  }
+}
+async function createEngine(ckpt, { device = null, onLost = null } = {}) {
+  const { shape } = ckpt;
+  const owns = !device;
+  if (!device) {
+    const gpu = globalThis.navigator?.gpu;
+    if (!gpu)
+      throw new NoWebGPU("this browser has no WebGPU");
+    const adapter = await gpu.requestAdapter();
+    if (!adapter)
+      throw new NoWebGPU("WebGPU is present but no GPU adapter is available");
+    checkDevice(adapter.limits, shape);
+    const need = deviceNeeds(shape);
+    const ask = (name, floor) => Math.min(adapter.limits[name], Math.max(need[name], floor));
+    device = await adapter.requestDevice({ requiredLimits: {
+      maxStorageBufferBindingSize: ask("maxStorageBufferBindingSize", 134217728),
+      maxBufferSize: ask("maxBufferSize", 268435456)
+    } });
+  } else {
+    checkDevice(device.limits, shape);
+  }
+  device.pushErrorScope("validation");
+  let engine;
+  try {
+    engine = new Engine(device, ckpt, { owns, onLost });
+  } catch (e) {
+    await device.popErrorScope();
+    if (owns)
+      device.destroy();
+    throw e;
+  }
+  const err = await device.popErrorScope();
+  if (err) {
+    engine.destroy();
+    throw new Error(`WebGPU: ${err.message}`);
+  }
+  return engine;
+}
 
 class Engine {
   static async create(device, weights, manifest) {
-    device.pushErrorScope("validation");
-    const e = new Engine(device, parseSafetensors(weights).tensors, manifest);
-    const err = await device.popErrorScope();
-    if (err)
-      throw new Error(`WebGPU: ${err.message}`);
-    return e;
+    const tensors = parseSafetensors(weights).tensors;
+    return createEngine({ manifest, tensors, shape: shapeOf(manifest, tensors) }, { device });
   }
-  constructor(device, tensors, manifest) {
+  constructor(device, { shape, tensors }, { owns = false, onLost = null } = {}) {
     this.device = device;
-    const shape = shapeOf(manifest);
+    this.shape = shape;
+    this.K = kernelSources(shape);
+    this.ST = stateLayout(shape);
+    this.owns = owns;
+    this.owned = [];
+    this.destroyed = false;
+    this.lostInfo = null;
+    this.lost = device.lost.then((info) => {
+      if (this.destroyed)
+        return null;
+      this.lostInfo = new DeviceLost(info.reason, info.message);
+      try {
+        onLost?.(this.lostInfo);
+      } catch (e) {
+        console.error(e);
+      }
+      return this.lostInfo;
+    });
     this.block = shape.block;
     this.maxSteps = shape.maxSteps;
-    if (shape.haltThresh !== 0.9)
-      throw new Error(`halt_thresh ${shape.haltThresh} is not ported (0.9 is)`);
     this.offset = 0;
-    this.topK = manifest.cfg.pool_top_k;
+    this.topK = shape.topK;
     this.least = 1;
     this.most = shape.maxSteps;
     const dev = device;
     const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
-    const buf = (bytes) => dev.createBuffer({ size: Math.max(16, Math.ceil(bytes / 16) * 16), usage });
+    const buf = (bytes) => this.#make({ size: Math.max(16, Math.ceil(bytes / 16) * 16), usage });
     const upload = (data) => {
       const b = buf(data.byteLength);
       dev.queue.writeBuffer(b, 0, data);
@@ -1800,7 +2047,7 @@ class Engine {
     const dense = (name) => upload(f32(T(name).bytes));
     this.w = {
       emb: tern("tok_emb.weight"),
-      pre: [0, 1].map((i) => ({
+      pre: Array.from({ length: shape.prelude }, (_, i) => ({
         ln1: dense(`prelude.${i}.ln1.weight`),
         ln2: dense(`prelude.${i}.ln2.weight`),
         qkv: tern(`prelude.${i}.attn.qkv.weight`),
@@ -1822,50 +2069,77 @@ class Engine {
       lnf: dense("ln_f.weight"),
       halt: upload(new Float32Array([...f32(T("halt.weight").bytes), ...f32(T("halt.bias").bytes)]))
     };
-    const R = MAX_ROWS;
+    const R = MAX_ROWS, ST = this.ST;
+    const { d: D, heads: HEADS, ff: FF, expertFf: EFF, vocab: V, experts: E, slots: SL } = shape;
+    this.vpad = pad16(V);
     this.b = {
       ids: buf(R * 4),
       x: buf(R * D * 4),
       h: buf(R * D * 4),
       u: buf(R * D * 4),
       a: buf(R * D * 4),
-      qkv: buf(R * QKV * 4),
+      qkv: buf(R * 3 * D * 4),
       att: buf(R * D * 4),
       x1: buf(R * D * 4),
-      ff: buf(R * 1408 * 4),
-      rl: buf(R * 32 * 4),
-      route: buf(R * 96 * 4),
-      eh: buf(R * 32 * 2048 * 4),
-      ep: buf(R * 32 * D * 4),
-      grp: buf((32 + 32 * R) * 4),
-      part: buf(HEADS * 32 * 66 * 4),
+      ff: buf(R * FF * 4),
+      rl: buf(R * E * 4),
+      route: buf(R * 3 * SL * 4),
+      eh: buf(R * SL * EFF * 4),
+      ep: buf(R * SL * D * 4),
+      grp: buf((E + E * R) * 4),
+      part: buf(HEADS * Math.ceil(this.block / 64) * 66 * 4),
       st: buf(ST.WORDS * 4),
       yf: buf(D * 4),
-      logits: buf(272 * 4),
+      logits: buf(this.vpad * 4),
       rope: upload(ropeTable(this.block, shape.theta))
     };
-    this.kv = Array.from({ length: SLOTS_PRE + this.maxSteps }, () => ({ k: buf(this.block * D * 4), v: buf(this.block * D * 4) }));
+    this.kv = Array.from({ length: shape.prelude + this.maxSteps }, () => ({ k: buf(this.block * D * 4), v: buf(this.block * D * 4) }));
     this.scratch = buf(this.block * D * 4);
-    this.snap = buf(16 * 4);
+    this.snap = buf((Math.ceil(this.block / MAX_ROWS) + 1) * ST.MW * 4);
     this.kept = null;
-    this.g = dev.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    this.read = dev.createBuffer({ size: 272 * 4 + 16, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    this.g = this.#make({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.read = this.#make({ size: this.vpad * 4 + 16, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
     this.cf = shape.cf;
     const COPY = GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
     this.d = {
       hist: buf(66 * 4),
       tr: buf(65 * 4),
-      pen: buf(272 * 4),
+      pen: buf(this.vpad * 4),
       out: buf(128 * 4),
-      gs: dev.createBuffer({ size: 64 * 16, usage: COPY }),
+      gs: this.#make({ size: 64 * 16, usage: COPY }),
       reads: []
     };
     this.ops = this.#build(false);
     this.ops1 = this.#build(true);
     this.pickOps = [
-      this.#op(TRACE, [this.d.hist, this.d.tr, this.d.pen], () => [5]),
-      this.#op(PICK, [this.b.logits, this.d.pen, this.d.hist, this.b.ids, this.d.out, this.b.st], () => [1])
+      this.#op(this.K.TRACE, [this.d.hist, this.d.tr, this.d.pen], () => [5]),
+      this.#op(this.K.PICK, [this.b.logits, this.d.pen, this.d.hist, this.b.ids, this.d.out, this.b.st], () => [1])
     ];
+  }
+  #make(desc) {
+    const b = this.device.createBuffer(desc);
+    this.owned.push(b);
+    return b;
+  }
+  destroy() {
+    if (this.destroyed)
+      return;
+    this.destroyed = true;
+    for (const b of this.owned)
+      b.destroy();
+    this.owned = [];
+    if (this.owns)
+      this.device.destroy();
+  }
+  #usable() {
+    if (this.lostInfo)
+      throw this.lostInfo;
+    if (this.destroyed)
+      throw new Error("this engine was destroyed");
+  }
+  async#failed(e) {
+    await Promise.race([this.lost, new Promise((r) => setTimeout(r, 200))]);
+    throw this.lostInfo ?? e;
   }
   #pipe(code) {
     this.pipes ??= new Map;
@@ -1876,7 +2150,7 @@ class Engine {
     return this.pipes.get(code);
   }
   #uniform(words) {
-    const b = this.device.createBuffer({
+    const b = this.#make({
       size: Math.ceil(words.byteLength / 16) * 16,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
     });
@@ -1895,14 +2169,16 @@ class Engine {
       layout: pipe.getBindGroupLayout(0),
       entries: entries.map((resource, binding) => ({ binding, resource: { buffer: resource } }))
     });
-    const name = Object.entries(exports_kernels).find(([, c]) => c === code)?.[0] ?? "?";
+    const name = Object.entries(this.K).find(([, c]) => c === code)?.[0] ?? "?";
     return { pipe, bind, groups, name };
   }
   #build(one) {
-    const { b, w, g } = this;
+    const { b, w, g, K, ST } = this;
+    const { d: D, heads: HEADS, ff: FF, expertFf: EFF, vocab: V, experts: E, slots: SL } = this.shape;
+    const QKV = 3 * D;
     const has0 = this.#uniform(new Uint32Array([0, 0, 0, 0]));
     const has1 = this.#uniform(new Uint32Array([1, 0, 0, 0]));
-    const qmm = (x, wt, y, inDim, outDim, { base = null, gate = NONE, rows1 = 0 } = {}) => one || rows1 ? this.#op(QMM1, [
+    const qmm = (x, wt, y, inDim, outDim, { base = null, gate = NONE, rows1 = 0 } = {}) => one || rows1 ? this.#op(K.QMM1, [
       g,
       this.#s({ inDim, outDim, gate, rows1 }),
       x,
@@ -1912,7 +2188,7 @@ class Engine {
       base ?? b.u,
       b.st,
       base ? has1 : has0
-    ], () => [Math.ceil(outDim / 8)]) : this.#op(QMM, [
+    ], () => [Math.ceil(outDim / 8)]) : this.#op(K.QMM, [
       g,
       this.#s({ inDim, outDim, gate, rows1 }),
       x,
@@ -1923,12 +2199,12 @@ class Engine {
       b.st,
       base ? has1 : has0
     ], (rows) => [Math.ceil(outDim / 64), Math.ceil(rows / 8)]);
-    const norm = (x, wt, y, gate = NONE) => this.#op(RMSNORM, [g, x, wt, y, this.#s({ gate }), b.st], (rows) => [rows]);
-    const ropeKv = (slot) => this.#op(ROPE_KV, [g, b.qkv, b.rope, this.kv[slot].k, this.kv[slot].v], (rows) => [Math.ceil(rows * 256 / 256)]);
+    const norm = (x, wt, y, gate = NONE) => this.#op(K.RMSNORM, [g, x, wt, y, this.#s({ gate }), b.st], (rows) => [rows]);
+    const ropeKv = (slot) => this.#op(K.ROPE_KV, [g, b.qkv, b.rope, this.kv[slot].k, this.kv[slot].v], (rows) => [Math.ceil(rows * HEADS * 32 / 256)]);
     const attn = (slot, gate) => one ? [
-      this.#op(ATTN1P, [g, this.#s({ gate }), b.qkv, this.kv[slot].k, this.kv[slot].v, b.part, b.st], () => [Math.ceil(this.block / 64), HEADS]),
-      this.#op(ATTN1M, [g, this.#s({ gate }), b.part, b.att, b.st], () => [HEADS])
-    ] : [this.#op(ATTN, [
+      this.#op(K.ATTN1P, [g, this.#s({ gate }), b.qkv, this.kv[slot].k, this.kv[slot].v, b.part, b.st], () => [Math.ceil(this.block / 64), HEADS]),
+      this.#op(K.ATTN1M, [g, this.#s({ gate }), b.part, b.att, b.st], () => [HEADS])
+    ] : [this.#op(K.ATTN, [
       g,
       this.#s({ gate }),
       b.qkv,
@@ -1938,28 +2214,28 @@ class Engine {
       b.st
     ], (rows) => [rows, HEADS])];
     const ops = [];
-    ops.push(this.#op(EMBED, [g, b.ids, w.emb.codes, w.emb.scales, b.x], (rows) => [Math.ceil(rows * D / 256)]));
+    ops.push(this.#op(K.EMBED, [g, b.ids, w.emb.codes, w.emb.scales, b.x], (rows) => [Math.ceil(rows * D / 256)]));
     w.pre.forEach((p, i) => {
-      ops.push(norm(b.x, p.ln1, b.a), qmm(b.a, p.qkv, b.qkv, D, QKV), ropeKv(i), ...attn(i, NONE), qmm(b.att, p.proj, b.x1, D, D, { base: b.x }), norm(b.x1, p.ln2, b.a), this.#op(QMM2, [
+      ops.push(norm(b.x, p.ln1, b.a), qmm(b.a, p.qkv, b.qkv, D, QKV), ropeKv(i), ...attn(i, NONE), qmm(b.att, p.proj, b.x1, D, D, { base: b.x }), norm(b.x1, p.ln2, b.a), this.#op(K.QMM2, [
         g,
-        this.#s({ inDim: D, outDim: 1408 }),
+        this.#s({ inDim: D, outDim: FF }),
         b.a,
         p.w1.codes,
         p.w1.scales,
         p.w3.codes,
         p.w3.scales,
         b.ff
-      ], (rows) => [Math.ceil(1408 / 64), Math.ceil(rows / 8)]), qmm(b.ff, p.w2, b.x, 1408, D, { base: b.x1 }));
+      ], (rows) => [Math.ceil(FF / 64), Math.ceil(rows / 8)]), qmm(b.ff, p.w2, b.x, FF, D, { base: b.x1 }));
     });
-    ops.push(this.#op(INIT, [g, b.h, b.st], (rows) => [Math.ceil(Math.max(rows * D, 64) / 256)]));
+    ops.push(this.#op(K.INIT, [g, b.h, b.st], (rows) => [Math.ceil(Math.max(rows * D, 64) / 256)]));
     const { rec: r, pool } = w;
     for (let n = 0;n < this.maxSteps; n++) {
-      const slot = SLOTS_PRE + n;
+      const slot = this.shape.prelude + n;
       const gate = ST.COUNT + n;
       const s = this.#s({ gate, pass: n, first: n === 0 ? 1 : 0, last: n === this.maxSteps - 1 ? 1 : 0 });
       const fresh = this.#s({ gate: n >= 2 ? ST.COUNT + n - 1 : NONE });
-      ops.push(one ? this.#op(ADAPTER1, [g, b.h, b.x, w.adapter, b.u, fresh, b.st], () => [D / 8]) : this.#op(ADAPTER, [g, b.h, b.x, w.adapter, b.u, fresh, b.st], (rows) => [D / 64, Math.ceil(rows / 8)]), norm(b.u, r.ln1, b.a, n >= 2 ? ST.COUNT + n - 1 : NONE), qmm(b.a, r.qkv, b.qkv, D, QKV, { gate: n >= 2 ? ST.COUNT + n - 1 : NONE }), ropeKv(slot), ...attn(slot, gate), qmm(b.att, r.proj, b.x1, D, D, { base: b.u, gate }), norm(b.x1, r.ln2, b.a, gate), this.#op(ROUTER, [g, s, b.a, r.depth, r.router, b.rl, b.st], (rows) => [rows]), this.#op(ADMIT, [s, b.st, g], () => [1]), this.#op(ROUTE, [g, s, b.rl, pool.gate, b.route, b.st], (rows) => [Math.ceil(rows / 64)]), this.#op(CAPACITY, [g, s, b.route, b.st], () => [1]), ...one ? [
-        this.#op(EXPERT13, [
+      ops.push(one ? this.#op(K.ADAPTER1, [g, b.h, b.x, w.adapter, b.u, fresh, b.st], () => [D / 8]) : this.#op(K.ADAPTER, [g, b.h, b.x, w.adapter, b.u, fresh, b.st], (rows) => [D / 64, Math.ceil(rows / 8)]), norm(b.u, r.ln1, b.a, n >= 2 ? ST.COUNT + n - 1 : NONE), qmm(b.a, r.qkv, b.qkv, D, QKV, { gate: n >= 2 ? ST.COUNT + n - 1 : NONE }), ropeKv(slot), ...attn(slot, gate), qmm(b.att, r.proj, b.x1, D, D, { base: b.u, gate }), norm(b.x1, r.ln2, b.a, gate), this.#op(K.ROUTER, [g, s, b.a, r.depth, r.router, b.rl, b.st], (rows) => [rows]), this.#op(K.ADMIT, [s, b.st, g], () => [1]), this.#op(K.ROUTE, [g, s, b.rl, pool.gate, b.route, b.st], (rows) => [Math.ceil(rows / 64)]), this.#op(K.CAPACITY, [g, s, b.route, b.st], () => [1]), ...one ? [
+        this.#op(K.EXPERT13, [
           g,
           s,
           b.a,
@@ -1970,21 +2246,21 @@ class Engine {
           b.route,
           b.eh,
           b.st
-        ], (rows) => [2048 / 64, rows * 32]),
-        this.#op(EXPERT2, [g, s, b.eh, pool.w2.codes, pool.w2.scales, b.route, b.ep, b.st], (rows) => [D / 64, rows * 32])
+        ], (rows) => [EFF / 64, rows * SL]),
+        this.#op(K.EXPERT2, [g, s, b.eh, pool.w2.codes, pool.w2.scales, b.route, b.ep, b.st], (rows) => [D / 64, rows * SL])
       ] : [
-        this.#op(GCLEAR, [b.grp], () => [1]),
-        this.#op(GROUP, [g, s, b.route, b.st, b.grp], (rows) => [Math.ceil(rows * 32 / 64)]),
-        this.#op(EXPERT13G, [g, b.a, pool.w1.codes, pool.w1.scales, pool.w3.codes, pool.w3.scales, b.grp, b.eh], (rows) => [2048 / 128, 32, Math.ceil(rows / 8)]),
-        this.#op(EXPERT2G, [g, b.eh, pool.w2.codes, pool.w2.scales, b.route, b.grp, b.ep], (rows) => [D / 256, 32, Math.ceil(rows / 8)])
-      ], this.#op(EXPERT_SUM, [g, s, b.ep, b.route, b.x1, b.h, b.st], (rows) => [D / 64, rows]), this.#op(EXIT, [g, s, b.h, w.lnf, w.halt, b.yf, b.st], (rows) => [rows]), qmm(b.yf, w.emb, b.logits, D, 265, { gate: ST.NEWLY + n, rows1: 1 }));
+        this.#op(K.GCLEAR, [b.grp], () => [1]),
+        this.#op(K.GROUP, [g, s, b.route, b.st, b.grp], (rows) => [Math.ceil(rows * SL / 64)]),
+        this.#op(K.EXPERT13G, [g, b.a, pool.w1.codes, pool.w1.scales, pool.w3.codes, pool.w3.scales, b.grp, b.eh], (rows) => [EFF / 128, E, Math.ceil(rows / 8)]),
+        this.#op(K.EXPERT2G, [g, b.eh, pool.w2.codes, pool.w2.scales, b.route, b.grp, b.ep], (rows) => [D / 256, E, Math.ceil(rows / 8)])
+      ], this.#op(K.EXPERT_SUM, [g, s, b.ep, b.route, b.x1, b.h, b.st], (rows) => [D / 64, rows]), this.#op(K.EXIT, [g, s, b.h, w.lnf, w.halt, b.yf, b.st], (rows) => [rows]), qmm(b.yf, w.emb, b.logits, D, V, { gate: ST.NEWLY + n, rows1: 1 }));
     }
     return ops;
   }
   reset() {
     this.offset = 0;
     this.kept = null;
-    this.device.queue.writeBuffer(this.b.st, 4, new Uint32Array([0]));
+    this.device.queue.writeBuffer(this.b.st, this.ST.VOTE * 4, new Uint32Array(this.ST.MW));
   }
   resume(ids) {
     const k = this.kept;
@@ -2001,7 +2277,8 @@ class Engine {
       return 0;
     }
     const enc = this.device.createCommandEncoder();
-    enc.copyBufferToBuffer(this.snap, (n / MAX_ROWS - 1) * 4, this.b.st, 4, 4);
+    const w = this.ST.MW * 4;
+    enc.copyBufferToBuffer(this.snap, (n / MAX_ROWS - 1) * w, this.b.st, this.ST.VOTE * 4, w);
     this.device.queue.submit([enc.finish()]);
     this.offset = n;
     return n;
@@ -2018,6 +2295,7 @@ class Engine {
       return;
     const drop = this.offset - keep;
     this.kept = null;
+    const D = this.shape.d;
     const enc = this.device.createCommandEncoder();
     for (const c of this.kv) {
       for (const buf of [c.k, c.v]) {
@@ -2079,9 +2357,10 @@ class Engine {
     return this.offset + n <= this.block && n <= 64;
   }
   decodeBatch(n) {
+    this.#usable();
     if (!this.canDecode(n))
       throw new Error(`no room for ${n} more bytes in the caches`);
-    if (!(this.topK >= 1 && this.topK <= 32) || !(this.least >= 1 && this.least <= this.most && this.most <= this.maxSteps)) {
+    if (!(this.topK >= 1 && this.topK <= this.shape.slots) || !(this.least >= 1 && this.least <= this.most && this.most <= this.maxSteps)) {
       throw new Error("settings out of range");
     }
     const q = this.device.queue, d = this.d;
@@ -2101,7 +2380,7 @@ class Engine {
       }
       pass.end();
     }
-    const read = d.reads.pop() ?? this.device.createBuffer({ size: 128 * 4, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    const read = d.reads.pop() ?? this.#make({ size: 128 * 4, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
     enc.copyBufferToBuffer(d.out, 0, read, 0, 128 * 4);
     q.submit([enc.finish()]);
     this.offset += n;
@@ -2111,17 +2390,18 @@ class Engine {
       read.unmap();
       d.reads.push(read);
       return { ids: Array.from(u.subarray(0, n)), passes: Array.from(u.subarray(64, 64 + n)) };
-    });
+    }, (e) => this.#failed(e));
   }
   async forward(ids, prefill = false) {
+    this.#usable();
     const rows = ids.length;
     if (rows < 1 || rows > MAX_ROWS)
       throw new Error(`a forward reads 1 to ${MAX_ROWS} ids, not ${rows}`);
     this.#trim(this.block - rows);
     const q = this.device.queue;
     q.writeBuffer(this.b.ids, 0, new Uint32Array(ids));
-    if (!(this.topK >= 1 && this.topK <= 32))
-      throw new Error(`experts per byte must be 1 to 32, not ${this.topK}`);
+    if (!(this.topK >= 1 && this.topK <= this.shape.slots))
+      throw new Error(`experts per byte must be 1 to ${this.shape.slots}, not ${this.topK}`);
     if (!(this.least >= 1 && this.least <= this.most && this.most <= this.maxSteps)) {
       throw new Error(`recurrence ${this.least} to ${this.most}: at least 1, at most ${this.maxSteps}, least ≤ most`);
     }
@@ -2134,23 +2414,28 @@ class Engine {
       pass.dispatchWorkgroups(...op.groups(rows));
     }
     pass.end();
-    enc.copyBufferToBuffer(this.b.logits, 0, this.read, 0, 265 * 4);
-    enc.copyBufferToBuffer(this.b.st, ST.STEPS * 4, this.read, 272 * 4, 4);
+    const V = this.shape.vocab, ST = this.ST;
+    enc.copyBufferToBuffer(this.b.logits, 0, this.read, 0, V * 4);
+    enc.copyBufferToBuffer(this.b.st, ST.STEPS * 4, this.read, this.vpad * 4, 4);
     if (prefill && rows === MAX_ROWS && this.offset % MAX_ROWS === 0) {
-      enc.copyBufferToBuffer(this.b.st, 4, this.snap, this.offset / MAX_ROWS * 4, 4);
+      const w = ST.MW * 4;
+      enc.copyBufferToBuffer(this.b.st, ST.VOTE * 4, this.snap, this.offset / MAX_ROWS * w, w);
     }
     q.submit([enc.finish()]);
-    await this.read.mapAsync(GPUMapMode.READ);
+    try {
+      await this.read.mapAsync(GPUMapMode.READ);
+    } catch (e) {
+      await this.#failed(e);
+    }
     const m = this.read.getMappedRange();
-    const logits = new Float32Array(m.slice(0, 265 * 4));
-    const passes = new Uint32Array(m.slice(272 * 4, 272 * 4 + 4))[0];
+    const logits = new Float32Array(m.slice(0, V * 4));
+    const passes = new Uint32Array(m.slice(this.vpad * 4, this.vpad * 4 + 4))[0];
     this.read.unmap();
     this.offset += rows;
     return { logits, passes };
   }
 }
-
-// web/text.js
+// lib/nirca-webgpu/src/tokenizer.js
 var SPECIALS = [
   "<think>",
   "</think>",
@@ -2231,12 +2516,30 @@ ${text}${IM_END}
   return at === -1 ? cut : cut.slice(at);
 }
 
-// web/decode.js
+class Tokenizer {
+  constructor(manifest) {
+    const vocab = manifest?.cfg?.vocab_size;
+    if (vocab !== VOCAB)
+      throw new Error(`this tokenizer has ${VOCAB} ids; the checkpoint's vocab_size is ${vocab}`);
+    this.block = manifest.cfg.block;
+    this.vocab = vocab;
+  }
+  encode(text) {
+    return encode(text);
+  }
+  decode(ids) {
+    return decode(ids);
+  }
+  chat(messages) {
+    return encode(buildPrompt(messages, Math.floor(this.block * 0.9)));
+  }
+}
+// lib/nirca-webgpu/src/decode.js
 var PREFILL_CHUNK = 512;
 var SHOWN_START = 3;
-var TRACE2 = { strength: 2.5, decay: 0.88, window: 64 };
+var TRACE = { strength: 2.5, decay: 0.88, window: 64 };
 var BATCH = 16;
-function adjusted(logits, prev, trace = TRACE2) {
+function adjusted(logits, prev, trace = TRACE) {
   const z = Float32Array.from(logits);
   if (!trace.strength || !prev.length)
     return z;
@@ -2260,7 +2563,11 @@ function argmax(z) {
 function endsTurn(written, end) {
   return decode(written.slice(-(end.length + 1))).endsWith(end);
 }
-async function* generate(engine, prompt, maxNew, end, { record = false, stop, reuse = false } = {}) {
+async function* generate(engine, prompt, { maxNew = 512, end = "<|im_end|>", record = false, stop, reuse = false, topK, recurrence } = {}) {
+  if (topK !== undefined)
+    engine.topK = topK;
+  if (recurrence)
+    [engine.least, engine.most] = recurrence;
   const ids = prompt.slice(-engine.block);
   if (!ids.length)
     ids.push(10);
@@ -2315,7 +2622,7 @@ async function* generate(engine, prompt, maxNew, end, { record = false, stop, re
       return;
     }
     n++;
-    engine.decodeStart(out.slice(0, -1), nxt, TRACE2);
+    engine.decodeStart(out.slice(0, -1), nxt, TRACE);
     const size = () => Math.min(BATCH, maxNew - n - queued);
     let queued = 0;
     const queue = [];
@@ -2373,7 +2680,6 @@ async function* generate(engine, prompt, maxNew, end, { record = false, stop, re
     yield* held;
   yield { ended: "cap" };
 }
-
 // web/facts.js
 var PUBLISHED_WEIGHTS = "https://tg-techie-agents.github.io/nirca-mini-webgpu/weights/";
 var LATEST_MANIFEST = "https://huggingface.co/nirca/nirca-mini/resolve/main/latest.json";
@@ -2498,7 +2804,6 @@ var CACHE = "nirca-mini-weights-v1";
 var CURRENT = "https://tg-techie-agents.github.io/nirca-mini-webgpu/.cache/current.json";
 var $ = (id) => document.getElementById(id);
 var engine = null;
-var device = null;
 var current = null;
 var messages = [];
 var busy = false;
@@ -2576,27 +2881,55 @@ async function cachedModel() {
   return null;
 }
 async function startEngine(buffer, config) {
-  if (!navigator.gpu)
-    throw new Error("This browser has no WebGPU, so the model can't run here. Use a recent Chrome, Edge or Safari on a device with a GPU.");
-  const adapter = await navigator.gpu.requestAdapter();
-  if (!adapter)
-    throw new Error("WebGPU is present but no GPU adapter is available.");
-  const dev = await adapter.requestDevice({ requiredLimits: {
-    maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
-    maxBufferSize: adapter.limits.maxBufferSize
-  } });
-  dev.lost.then((info) => {
-    if (dev !== device || info.reason === "destroyed")
-      return;
-    engine = null;
-    setLoad(`The GPU device was lost (${info.message || info.reason}). Reload the page to start again.`, null, true);
-    setChatEnabled(false);
-  });
-  const e = await Engine.create(dev, buffer, config);
-  e.reset();
-  await e.forward([10]);
+  let e;
+  try {
+    const ckpt = await loadCheckpoint({ weights: new Uint8Array(buffer), manifest: config });
+    e = await createEngine(ckpt, { onLost: engineLost });
+    e.reset();
+    await e.forward([10]);
+  } catch (err) {
+    e?.destroy();
+    if (err instanceof NoWebGPU)
+      throw new Error("This browser has no WebGPU, or no GPU adapter, so the model can't run here. Use a recent Chrome, Edge or Safari on a device with a GPU.");
+    throw err;
+  }
   showFacts(config, buffer);
-  return [dev, e];
+  return e;
+}
+var lossesAt = [];
+async function engineLost(err) {
+  if (engine?.lostInfo !== err)
+    return;
+  const lost = engine;
+  engine = null;
+  lost.destroy();
+  setChatEnabled(false);
+  const why = err.deviceMessage || err.reason;
+  const now = Date.now();
+  lossesAt = lossesAt.filter((t) => now - t < 120000);
+  lossesAt.push(now);
+  while (busy)
+    await new Promise((r) => setTimeout(r, 100));
+  if (lossesAt.length > 1 || !current) {
+    setLoad(`The GPU device was lost again (${why}). Reload the page to start again.`, null, true);
+    return;
+  }
+  busy = true;
+  $("bar").hidden = false;
+  try {
+    setLoad(`The GPU device was lost (${why}). Loading the model again…`, 0.3);
+    const { buffer } = await fetchWeights(current.base, current.config, progress("Loading the model again"));
+    setLoad("Loading onto the GPU…", 0.95);
+    engine = await startEngine(buffer, current.config);
+    setLoad(`The GPU device was lost (${why}); the model is loaded again. Your chat continues.`, 1);
+  } catch (e) {
+    console.error(e);
+    setLoad(`The GPU device was lost (${why}), and the model could not be loaded again (${e.message ?? e}). Reload the page to start again.`, null, true);
+  } finally {
+    $("bar").hidden = true;
+    busy = false;
+    setChatEnabled(!!engine);
+  }
 }
 function showFacts(config, buffer) {
   let weights = null;
@@ -2723,7 +3056,7 @@ async function load() {
     const { buffer, cached } = await fetchWeights(base, config, progress("Downloading the model"));
     const t1 = performance.now();
     setLoad("Loading onto the GPU…", 0.95);
-    [device, engine] = await startEngine(buffer, config);
+    engine = await startEngine(buffer, config);
     current = { base, config };
     const t2 = performance.now();
     setLoad(`${cached ? "Loaded from cache" : `Downloaded ${mb(buffer.byteLength)} MB`} in ${((t1 - t0) / 1000).toFixed(1)} s, ` + `ready on the GPU in ${((t2 - t1) / 1000).toFixed(1)} s. Model ${config.name ?? "?"}, step ${config.step ?? "?"}.`, 1);
@@ -2785,9 +3118,19 @@ async function follow(next, picked = false) {
   try {
     const { buffer } = await fetchWeights(next.base, next.config, progress(`Downloading step ${to}`));
     setLoad("Loading onto the GPU…", 0.95);
-    const old = device;
-    [device, engine] = await startEngine(buffer, next.config);
-    old?.destroy();
+    engine?.destroy();
+    engine = null;
+    try {
+      engine = await startEngine(buffer, next.config);
+    } catch (e) {
+      try {
+        const back = await fetchWeights(current.base, current.config, progress(`Loading step ${was} again`));
+        engine = await startEngine(back.buffer, current.config);
+      } catch (e2) {
+        console.error(e2);
+      }
+      throw e;
+    }
     current = next;
     showTaken();
     $("loadText").textContent = "Model loaded.";
@@ -2804,7 +3147,7 @@ async function follow(next, picked = false) {
   } catch (e) {
     console.error(e);
     $("loadText").textContent = "Model loaded.";
-    setLoad(`Switching to step ${to} failed (${e.message ?? e}); still on step ${was}.`, null, true);
+    setLoad(engine ? `Switching to step ${to} failed (${e.message ?? e}); still on step ${was}.` : `Switching to step ${to} failed (${e.message ?? e}), and step ${was} could not be loaded again. Reload the page to start again.`, null, true);
   } finally {
     $("bar").hidden = true;
     busy = false;
@@ -2971,6 +3314,7 @@ var modelText = (m) => `step ${Number(m.step).toLocaleString("en-US")}${m.checkp
 async function send(text) {
   if (!engine || busy || !text.trim())
     return;
+  const eng = engine;
   busy = true;
   stopAsked = false;
   setChatEnabled(true);
@@ -2980,18 +3324,18 @@ async function send(text) {
   const el = bubble("bot", "");
   el.classList.add("writing");
   const span = el.querySelector(".text");
-  const prompt = encode(buildPrompt(messages, Math.floor(engine.block * 0.9)));
+  const prompt = new Tokenizer(current.config).chat(messages);
   const maxNew = clampInput("maxNew", 1, 2000, 512);
-  const experts = current?.config.cfg?.pool_experts ?? 32;
-  engine.topK = clampInput("topK", 1, experts, Math.min(DEFAULTS.topK, experts));
-  engine.least = clampInput("least", 1, engine.maxSteps, 1);
-  engine.most = clampInput("most", engine.least, engine.maxSteps, engine.maxSteps);
+  const experts = eng.shape.slots;
+  const topK = clampInput("topK", 1, experts, Math.min(DEFAULTS.topK, experts));
+  const least = clampInput("least", 1, eng.maxSteps, 1);
+  const most = clampInput("most", least, eng.maxSteps, eng.maxSteps);
   const model = modelOf(current?.config);
   const out = new TextOut;
   let reply = "", n = 0, passes = 0, tStart = 0, ended = "";
   const t0 = performance.now();
   try {
-    for await (const ev of generate(engine, prompt, maxNew, IM_END, { stop: () => stopAsked, reuse: params.get("cache") !== "0" })) {
+    for await (const ev of generate(eng, prompt, { maxNew, topK, recurrence: [least, most], stop: () => stopAsked, reuse: params.get("cache") !== "0" })) {
       if (ev.reading !== undefined) {
         $("genStatus").textContent = `Reading the conversation: ${ev.reading} of ${ev.of} bytes`;
         if (ev.reading === ev.of)
@@ -3015,7 +3359,7 @@ async function send(text) {
     const meta = document.createElement("span");
     meta.className = "meta";
     const why = { end: "", cap: " · stopped at the length limit", stopped: " · stopped" }[ended] ?? "";
-    meta.textContent = `${modelText(model)} · ${n} bytes · ${(n / s).toFixed(1)} bytes/s · read ${prompt.length} in ` + `${((tStart - t0) / 1000).toFixed(1)} s · ${n ? (passes / n).toFixed(1) : 0} passes per byte · ` + `${engine.topK} experts per byte${why}`;
+    meta.textContent = `${modelText(model)} · ${n} bytes · ${(n / s).toFixed(1)} bytes/s · read ${prompt.length} in ` + `${((tStart - t0) / 1000).toFixed(1)} s · ${n ? (passes / n).toFixed(1) : 0} passes per byte · ` + `${eng.topK} experts per byte${why}`;
     el.append(meta);
     messages.push({ role: "assistant", content: reply, meta: meta.textContent, model });
     saveChat();
@@ -3082,7 +3426,9 @@ $("newChat").addEventListener("click", () => {
   $("input").focus();
 });
 $("chatsButton").addEventListener("click", () => toggleChats());
-window.__chat = { get ready() {
+window.__chat = { destroyDevice() {
+  engine?.device.destroy();
+}, get ready() {
   return !!engine && !busy;
 }, get step() {
   return current?.config.step;
