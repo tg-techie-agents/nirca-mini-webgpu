@@ -182,6 +182,13 @@ SOFTWARE.
   #chatList li[aria-current="true"] .open { background: var(--soft); }
   #chatList .del { border: 0; background: none; color: var(--muted); padding: 0 12px; font-size: 18px; }
   #chats .hint { padding: 8px; }
+  #chats .headRow { display: flex; justify-content: space-between; align-items: baseline; padding-right: 8px; }
+  #chats .headRow .linkish { font-size: 12px; }
+  button.linkish { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); text-decoration: underline; cursor: pointer; }
+  button.linkish:hover { color: var(--accent); }
+  dialog#share .small { margin: 10px 0 0; font-size: 12px; color: var(--muted); text-align: center; }
+  dialog#share .small:empty { display: none; }
+  #shareChatUrl { width: 100%; box-sizing: border-box; margin-top: 8px; font-size: 16px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--ink); }
   .headline { list-style: none; padding: 12px 14px; margin: 12px 0 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel, transparent); }
   .headline li + li { margin-top: 8px; }
   #chats .listHead { margin: 0; padding: 6px 8px 2px; font-size: 13px; font-weight: 600; color: var(--muted); }
@@ -231,15 +238,18 @@ SOFTWARE.
       <a href="#charter" data-tab="charter">Charter</a>
       <a href="slides.html" id="slidesLink" target="_blank" rel="noopener">Slides ↗</a>
       <button id="shareButton" type="button" aria-label="Share" title="Share"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M8 7l4-4 4 4M5 11v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/></svg></button>
-      <span class="ver" data-fill="site" title="site v51, built 2026-10-14 from e303a12">site v51</span>
+      <span class="ver" data-fill="site" title="site v53, built 2026-10-14 from 5e08f72">site v53</span>
     </nav>
   </header>
 
   <main id="chatTab">
     <section class="panel" id="chats" hidden aria-label="Saved chats">
-      <h2 class="listHead">History</h2>
+      <div class="headRow"><h2 class="listHead">History</h2><button class="linkish" id="exportChats" type="button" title="Download every saved chat as a JSON file, made in this browser">Export chats</button></div>
       <ul id="chatList"></ul>
       <p class="hint" id="chatsNone">No saved chats yet. A chat is kept in this browser once it has a reply.</p>
+    </section>
+    <section class="panel" id="sharedBanner" hidden>
+      <div class="row"><div class="grow" id="sharedText"></div><button class="primary" id="sharedStart" type="button">Start your own chat</button></div>
     </section>
     <section class="panel" id="loader">
       <div class="row">
@@ -660,6 +670,9 @@ Reply with your next message in the conversation, and nothing else.
     <button id="shareDo" type="button" hidden>Share</button>
     <button id="shareClose" type="button" autofocus>Close</button>
   </div>
+  <p class="small"><button class="linkish" id="shareChat" type="button" hidden>Copy a link to this chat</button></p>
+  <p class="small" id="shareChatNote"></p>
+  <input id="shareChatUrl" type="text" readonly hidden aria-label="Link to this chat">
 </dialog>
 
 <div class="toast" id="toast" role="status" hidden>
@@ -2680,6 +2693,63 @@ async function* generate(engine, prompt, { maxNew = 512, end = "<|im_end|>", rec
     yield* held;
   yield { ended: "cap" };
 }
+// web/chatshare.js
+var FRAGMENT = "chat=";
+var MAX_FRAGMENT = 8000;
+
+class TooLong extends Error {
+  constructor(length) {
+    super(`this chat is ${length.toLocaleString("en-US")} characters as a link; the limit is ${MAX_FRAGMENT.toLocaleString("en-US")}`);
+    this.length = length;
+  }
+}
+var b64 = (bytes) => btoa(Array.from(bytes, (b) => String.fromCharCode(b)).join("")).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+var unb64 = (text) => Uint8Array.from(atob(text.replaceAll("-", "+").replaceAll("_", "/")), (c) => c.charCodeAt(0));
+async function through(stream, bytes) {
+  const out = await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer();
+  return new Uint8Array(out);
+}
+async function packChat(messages) {
+  const m = messages.map((x) => [x.role === "user" ? "u" : "a", x.content, x.role === "user" ? 0 : x.model?.step ?? 0]);
+  const bytes = await through(new CompressionStream("deflate-raw"), new TextEncoder().encode(JSON.stringify({ v: 1, m })));
+  const text = b64(bytes);
+  if (text.length > MAX_FRAGMENT)
+    throw new TooLong(text.length);
+  return text;
+}
+async function unpackChat(text) {
+  const raw = await through(new DecompressionStream("deflate-raw"), unb64(text));
+  const data = JSON.parse(new TextDecoder().decode(raw));
+  if (data?.v !== 1 || !Array.isArray(data.m) || !data.m.length)
+    throw new Error("not a shared chat");
+  return data.m.map(([r, content, step]) => {
+    if (r !== "u" && r !== "a" || typeof content !== "string")
+      throw new Error("not a shared chat");
+    return { role: r === "u" ? "user" : "assistant", content, step: Number.isInteger(step) && step > 0 ? step : null };
+  });
+}
+var iso = (t) => typeof t === "number" && Number.isFinite(t) ? new Date(t).toISOString() : null;
+function exportChats(chats, { page = null, now = Date.now() } = {}) {
+  const conversations = Object.entries(chats).sort(([, a], [, b]) => a.updated - b.updated).map(([id, c]) => ({
+    id,
+    title: c.title,
+    updated: iso(c.updated),
+    messages: c.messages.map((m) => m.role === "user" ? { role: "user", text: m.content, at: iso(m.at) } : {
+      role: "assistant",
+      text: m.content,
+      at: iso(m.at),
+      model: m.model ? {
+        name: m.model.name ?? null,
+        step: m.model.step ?? null,
+        checkpoint: m.model.checkpoint ?? null,
+        published: m.model.taken ?? null
+      } : null,
+      stats: m.meta ?? null
+    })
+  }));
+  return { format: "nirca-mini-chats", version: 1, exported: iso(now), page, note: "Replies are the model's own, greedy; a missing `at` is a message kept before times were recorded (the chat's `updated` is its latest).", conversations };
+}
+
 // web/facts.js
 var PUBLISHED_WEIGHTS = "https://tg-techie-agents.github.io/nirca-mini-webgpu/weights/";
 var LATEST_MANIFEST = "https://huggingface.co/nirca/nirca-mini/resolve/main/latest.json";
@@ -3001,9 +3071,9 @@ async function whenTaken(config) {
           body: JSON.stringify({ paths: [`${folder.replace(/\/$/, "")}/model.safetensors`], expand: true })
         });
         const date = (await res.json())?.[0]?.lastCommit?.date;
-        const iso = Number.isNaN(Date.parse(date)) ? null : date;
-        takenKnown.set(folder, iso);
-        return iso;
+        const iso2 = Number.isNaN(Date.parse(date)) ? null : date;
+        takenKnown.set(folder, iso2);
+        return iso2;
       } catch {
         return null;
       }
@@ -3011,18 +3081,18 @@ async function whenTaken(config) {
   return takenAt.get(folder);
 }
 var dateFormat = new Intl.DateTimeFormat("sv-SE", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", timeZoneName: "short" });
-var stampText = (iso) => dateFormat.format(new Date(iso));
-function agoText(iso) {
-  const min = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60000));
+var stampText = (iso2) => dateFormat.format(new Date(iso2));
+function agoText(iso2) {
+  const min = Math.max(0, Math.round((Date.now() - Date.parse(iso2)) / 60000));
   return min < 1 ? "just now" : min < 90 ? `${min} min ago` : min < 2880 ? `${Math.round(min / 60)} h ago` : `${Math.round(min / 1440)} days ago`;
 }
 async function showTaken() {
-  const config = current?.config, iso = await whenTaken(config);
+  const config = current?.config, iso2 = await whenTaken(config);
   if (config !== current?.config)
     return;
-  $("modelWhen").hidden = !iso;
-  if (iso)
-    $("modelWhen").textContent = `This checkpoint was published ${stampText(iso)} (${agoText(iso)}).`;
+  $("modelWhen").hidden = !iso2;
+  if (iso2)
+    $("modelWhen").textContent = `This checkpoint was published ${stampText(iso2)} (${agoText(iso2)}).`;
 }
 var progress = (verb) => (got, total) => setLoad(total ? `${verb}: ${mb(got)} of ${mb(total)} MB` : `${verb}: ${mb(got)} MB`, total ? got / total * 0.9 : null);
 async function load() {
@@ -3250,6 +3320,7 @@ function renderChats() {
   list.replaceChildren();
   const ids = Object.keys(chats).sort((a, b) => chats[b].updated - chats[a].updated);
   $("chatsNone").hidden = ids.length > 0;
+  $("exportChats").hidden = ids.length === 0;
   for (const id of ids) {
     const c = chats[id];
     const li = document.createElement("li");
@@ -3319,7 +3390,7 @@ async function send(text) {
   stopAsked = false;
   setChatEnabled(true);
   $("stop").hidden = false;
-  messages.push({ role: "user", content: text });
+  messages.push({ role: "user", content: text, at: Date.now() });
   bubble("user", text.trim());
   const el = bubble("bot", "");
   el.classList.add("writing");
@@ -3361,7 +3432,7 @@ async function send(text) {
     const why = { end: "", cap: " · stopped at the length limit", stopped: " · stopped" }[ended] ?? "";
     meta.textContent = `${modelText(model)} · ${n} bytes · ${(n / s).toFixed(1)} bytes/s · read ${prompt.length} in ` + `${((tStart - t0) / 1000).toFixed(1)} s · ${n ? (passes / n).toFixed(1) : 0} passes per byte · ` + `${eng.topK} experts per byte${why}`;
     el.append(meta);
-    messages.push({ role: "assistant", content: reply, meta: meta.textContent, model });
+    messages.push({ role: "assistant", content: reply, meta: meta.textContent, model, at: Date.now() });
     saveChat();
     $("genStatus").textContent = "";
   } catch (e) {
@@ -3527,11 +3598,103 @@ $("input").addEventListener("blur", () => setTimeout(fitSeen, 50));
     }
   });
 }
+$("exportChats").addEventListener("click", () => {
+  const site = document.querySelector('[data-fill="site"]')?.textContent?.trim() || null;
+  const text = JSON.stringify(exportChats(chats, { page: site }), null, 2);
+  const a = Object.assign(document.createElement("a"), {
+    href: URL.createObjectURL(new Blob([text], { type: "application/json" })),
+    download: `nirca-mini-chats-${new Date().toISOString().slice(0, 10)}.json`
+  });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1e4);
+});
+var chatLink = async () => `${location.origin}${location.pathname}#${FRAGMENT}${await packChat(messages)}`;
+var shared = false;
+{
+  const dlg = $("share"), btn = $("shareChat"), note = $("shareChatNote");
+  const available = () => !shared && messages.some((m) => m.role === "assistant");
+  $("shareButton").addEventListener("click", () => {
+    btn.hidden = !available();
+    note.textContent = "";
+  });
+  const field = $("shareChatUrl");
+  btn.addEventListener("click", async () => {
+    note.textContent = "";
+    field.hidden = true;
+    let url = null, ok = false;
+    try {
+      const made = chatLink();
+      if (window.ClipboardItem && navigator.clipboard?.write) {
+        try {
+          await navigator.clipboard.write([new ClipboardItem({ "text/plain": made.then((u) => new Blob([u], { type: "text/plain" })) })]);
+          ok = true;
+        } catch {}
+      }
+      url = await made;
+      if (!ok) {
+        try {
+          await navigator.clipboard.writeText(url);
+          ok = true;
+        } catch {}
+      }
+    } catch (e) {
+      note.textContent = e instanceof TooLong ? `${e.message}. Use Export chats in History instead.` : `Couldn't make a link (${e.message ?? e}).`;
+      return;
+    }
+    if (ok) {
+      note.textContent = "Copied. The chat is inside the link; no server sees it.";
+      return;
+    }
+    field.value = url;
+    field.hidden = false;
+    field.focus();
+    field.select();
+    note.textContent = "Press and hold the link to copy it.";
+  });
+}
+async function showShared(text) {
+  const banner = $("sharedBanner");
+  try {
+    const list = await unpackChat(text);
+    shared = true;
+    for (const el of [...$("chat").querySelectorAll(".msg")])
+      el.remove();
+    $("empty").hidden = true;
+    for (const x of list)
+      bubble(x.role === "user" ? "user" : "bot", x.content.trim(), x.step ? `step ${x.step.toLocaleString("en-US")}` : "");
+    $("sharedText").textContent = "A shared chat, replayed from its link. It is read-only, and the model isn't loaded.";
+    banner.hidden = false;
+    $("loader").hidden = true;
+    $("input").placeholder = "Start your own chat to write";
+    toEnd();
+    return true;
+  } catch (e) {
+    console.warn("shared chat:", e);
+    $("sharedText").textContent = "This link's chat couldn't be read, so here is your own chat.";
+    banner.hidden = false;
+    return false;
+  }
+}
+$("sharedStart").addEventListener("click", () => {
+  const url = new URL(location.href);
+  url.hash = "";
+  history.replaceState(null, "", url);
+  shared = false;
+  $("sharedBanner").hidden = true;
+  $("loader").hidden = false;
+  $("input").placeholder = "Message Nirca Mini";
+  showChat(openId);
+  load();
+});
 restore();
-showModels();
 showTab();
 fitSeen();
-load();
+if (location.hash.startsWith(`#${FRAGMENT}`) && await showShared(location.hash.slice(1 + FRAGMENT.length))) {} else {
+  showModels();
+  load();
+}
 </script>
 </body>
 </html>
