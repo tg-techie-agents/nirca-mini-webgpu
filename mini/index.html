@@ -230,6 +230,8 @@ SOFTWARE.
     width: max-content; max-width: calc(100% - 32px); display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
     background: var(--panel); border: 1px solid var(--accent); border-radius: 12px; padding: 10px 14px;
     box-shadow: 0 6px 24px rgba(0,0,0,0.15); font-size: 14px; z-index: 2; }
+  .update { margin: 8px 0 0; font-size: 13px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .update button { padding: 2px 10px; font-size: 13px; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -248,8 +250,9 @@ SOFTWARE.
       <a href="#charter" data-tab="charter">Charter</a>
       <a href="slides.html" id="slidesLink" target="_blank" rel="noopener">Slides ↗</a>
       <button id="shareButton" type="button" aria-label="Share" title="Share"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M8 7l4-4 4 4M5 11v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/></svg></button>
-      <span class="ver" data-fill="site" title="site v56, built 2026-10-14 from d4c8ede">site v56</span>
+      <span class="ver" data-fill="site" title="site v58, built 2026-10-14 from 7c4746e">site v58</span>
     </nav>
+    <p class="update" id="update" role="status" hidden><span id="updateText"></span> <button id="updateReload" type="button">Reload</button></p>
   </header>
 
   <main id="chatTab">
@@ -3536,6 +3539,7 @@ async function send(text) {
       followAfterReply = false;
       checkLatest();
     }
+    window.__update?.done();
   }
 }
 $("load").addEventListener("click", load);
@@ -3775,6 +3779,48 @@ $("sharedStart").addEventListener("click", () => {
 restore();
 showTab();
 fitSeen();
+{
+  const stampOf = (text) => {
+    const m = /site v(\d+)\b[^"]*? from ([0-9a-f]+)/.exec(text ?? "");
+    return m ? { n: Number(m[1]), key: m[0] } : null;
+  };
+  const mine = stampOf(document.querySelector('[data-fill="site"]')?.title);
+  let offered = false, reloadWhenDone = false;
+  const check = async () => {
+    if (!mine || offered || location.protocol === "file:")
+      return;
+    try {
+      const res = await fetch(location.origin + location.pathname, { cache: "no-store" });
+      const theirs = res.ok ? stampOf((await res.text()).match(/data-fill="site" title="([^"]*)"/)?.[1]) : null;
+      if (!theirs || theirs.n <= mine.n)
+        return;
+      offered = true;
+      $("updateText").textContent = `A newer version of this page is available (site v${theirs.n}).`;
+      $("update").hidden = false;
+    } catch {}
+  };
+  $("updateReload").addEventListener("click", () => {
+    if (!busy) {
+      location.reload();
+      return;
+    }
+    reloadWhenDone = true;
+    $("updateText").textContent = "Reloading when the reply is done.";
+    $("updateReload").hidden = true;
+  });
+  window.__update = { get waiting() {
+    return reloadWhenDone;
+  }, done() {
+    if (reloadWhenDone && !busy)
+      location.reload();
+  } };
+  setInterval(check, CHECK_EVERY);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden)
+      check();
+  });
+  setTimeout(check, 3000);
+}
 if (location.hash.startsWith(`#${FRAGMENT}`) && await showShared(location.hash.slice(1 + FRAGMENT.length))) {} else {
   showModels();
   load();
