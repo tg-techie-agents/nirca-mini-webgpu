@@ -238,7 +238,7 @@ SOFTWARE.
       <a href="#charter" data-tab="charter">Charter</a>
       <a href="slides.html" id="slidesLink" target="_blank" rel="noopener">Slides ↗</a>
       <button id="shareButton" type="button" aria-label="Share" title="Share"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M8 7l4-4 4 4M5 11v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/></svg></button>
-      <span class="ver" data-fill="site" title="site v53, built 2026-10-14 from 5e08f72">site v53</span>
+      <span class="ver" data-fill="site" title="site v54, built 2026-10-14 from 39df695">site v54</span>
     </nav>
   </header>
 
@@ -2821,7 +2821,50 @@ var slash = (u) => u.endsWith("/") ? u : u + "/";
 var latestUrl = () => new URL(params.get("latest") ?? LATEST_MANIFEST, location.href).href;
 var SHARE_URL = "https://tg-techie-agents.github.io/nirca-mini-webgpu/mini/";
 var PINNED = { "72178": "checkpoints/2069316k/", "62895": "checkpoints/1217308k/", original: "checkpoints/1168355k/" };
-var choice = Object.hasOwn(PINNED, params.get("model")) ? params.get("model") : "latest";
+var choice = params.get("model") ?? "latest";
+var isPinned = (key) => Object.hasOwn(PINNED, key);
+var INDEX_URL = new URL("lines.json", LATEST_MANIFEST).href;
+function cleanIndex(raw) {
+  const text = (v) => typeof v === "string" && v ? v : null;
+  const lines = [];
+  for (const l of Array.isArray(raw?.lines) ? raw.lines : []) {
+    const id = text(l?.id);
+    const channels = Object.fromEntries(Object.entries(l?.channels ?? {}).filter(([k, v]) => k && !k.includes("/") && text(v)));
+    if (!id || id.includes("/") || !Object.keys(channels).length || lines.some((x) => x.id === id))
+      continue;
+    lines.push({ id, kind: l.kind === "base" ? "base" : "chat", label: text(l.label) ?? id, channels, flagged: l.default === true });
+  }
+  if (!lines.length)
+    return null;
+  const pick = lines.find((l) => l.flagged && l.kind !== "base") ?? lines.find((l) => l.kind !== "base") ?? lines.find((l) => l.flagged) ?? lines[0];
+  return { lines: [pick, ...lines.filter((l) => l !== pick)], default: pick.id };
+}
+var SINGLE_LINE = { lines: [{ id: "latest", kind: "base", label: "", channels: { latest: "latest.json" } }], default: "latest", single: true };
+var indexReady = null;
+function readIndex() {
+  indexReady ??= (async () => {
+    if (params.has("latest") || params.has("weights"))
+      return SINGLE_LINE;
+    try {
+      const res = await fetch(INDEX_URL, { cache: "no-cache" });
+      if (res.ok)
+        return cleanIndex(await res.json()) ?? SINGLE_LINE;
+    } catch {}
+    return SINGLE_LINE;
+  })();
+  return indexReady;
+}
+async function channelOf(key) {
+  const index = await readIndex();
+  const dflt = index.lines.find((l) => l.id === index.default);
+  const [lineId, channel] = key === "latest" ? [dflt.id, "latest"] : key.split("/");
+  const line = index.lines.find((l) => l.id === lineId);
+  const path = line?.channels[channel ?? ""];
+  if (!path)
+    return null;
+  const url = line === dflt && channel === "latest" && params.has("latest") ? latestUrl() : new URL(path, LATEST_MANIFEST).href;
+  return { line, channel, url, key: line === dflt && channel === "latest" ? "latest" : `${line.id}/${channel}` };
+}
 async function readPinned(key) {
   const base = slash(new URL(PINNED[key], LATEST_MANIFEST).href);
   const res = await fetch(`${base}config.json`, { cache: "no-cache" });
@@ -2836,17 +2879,28 @@ function weightCandidates() {
   const near = location.protocol === "file:" || location.origin === new URL(PUBLISHED_WEIGHTS).origin ? [] : ["weights/"];
   return [...new Set([...near, PUBLISHED_WEIGHTS])];
 }
-function latestBase(manifest) {
-  return slash(new URL(manifest?.checkpoint ?? manifest?.url ?? ".", latestUrl()).href);
+function latestBase(manifest, from = latestUrl()) {
+  return slash(new URL(manifest?.checkpoint ?? manifest?.url ?? ".", from).href);
 }
-async function readLatest() {
-  const res = await fetch(latestUrl(), { cache: "no-cache" });
+async function readLatest(url = latestUrl()) {
+  const res = await fetch(url, { cache: "no-cache" });
   if (!res.ok)
-    throw new Error(`HTTP ${res.status}`);
+    throw new Error(`${url}: HTTP ${res.status}`);
   const m = await res.json();
   if (!(Number.isInteger(m?.step) && m.cfg && typeof m.cfg === "object" && m.name))
     throw new Error("the manifest lacks step, name or cfg");
   return m;
+}
+async function resolveChoice(key) {
+  if (isPinned(key)) {
+    const [base, config2] = await readPinned(key);
+    return { base, config: config2 };
+  }
+  const ch = await channelOf(key);
+  if (!ch)
+    throw new Error(`no model "${key}" in the published index`);
+  const config = await readLatest(ch.url);
+  return { base: latestBase(config, ch.url === latestUrl() ? ch.url : LATEST_MANIFEST), config };
 }
 async function findWeights() {
   const tried = [];
@@ -3018,15 +3072,31 @@ function showFacts(config, buffer) {
 var MODEL_LABELS = { latest: "Latest, follows the published model", "72178": "Hard checkpoint", "62895": "Fixed model", original: "Original published model" };
 var MODEL_ORDER = ["latest", "72178", "62895", "original"];
 var tokensText = (n) => `${(n / 1e9).toFixed(2)}B tokens`;
-function showModels() {
+var stepText = (c) => ` (step ${Number(c.step).toLocaleString("en-US")}${c.tokens ? `, ${tokensText(c.tokens)}` : ""})`;
+async function showModels() {
   const sel = $("model");
   if (!sel.options.length) {
-    for (const key of MODEL_ORDER)
-      sel.add(new Option(MODEL_LABELS[key], key));
-    for (const key of Object.keys(PINNED))
-      readPinned(key).then(([, c]) => {
-        sel.querySelector(`option[value="${key}"]`).textContent = `${MODEL_LABELS[key]} (step ${Number(c.step).toLocaleString("en-US")}${c.tokens ? `, ${tokensText(c.tokens)}` : ""})`;
+    const index = await readIndex();
+    const add = (parent, key, label, read) => {
+      const opt = new Option(label, key);
+      parent.append(opt);
+      read.then((c) => {
+        opt.textContent = label + stepText(c);
       }).catch(() => {});
+    };
+    const pinned = index.single ? sel : Object.assign(document.createElement("optgroup"), { label: "Fixed earlier models" });
+    for (const l of index.lines) {
+      const group = index.single ? sel : sel.appendChild(Object.assign(document.createElement("optgroup"), { label: l.label }));
+      for (const channel of Object.keys(l.channels)) {
+        const ch = await channelOf(l.id === index.default && channel === "latest" ? "latest" : `${l.id}/${channel}`);
+        const label = index.single ? MODEL_LABELS.latest : channel;
+        add(group, ch.key, label, readLatest(ch.url));
+      }
+    }
+    if (!index.single)
+      sel.append(pinned);
+    for (const key of MODEL_ORDER.filter(isPinned))
+      add(pinned, key, MODEL_LABELS[key], readPinned(key).then(([, c]) => c));
   }
   sel.value = choice;
 }
@@ -3039,7 +3109,7 @@ async function chooseModel() {
   const was = choice;
   choice = picked;
   try {
-    const next = picked === "latest" ? await readLatest().then((m) => ({ base: latestBase(m), config: m })) : await readPinned(picked).then(([base, config]) => ({ base, config }));
+    const next = await resolveChoice(picked);
     const url = new URL(location.href);
     if (picked === "latest")
       url.searchParams.delete("model");
@@ -3104,19 +3174,14 @@ async function load() {
     const explicit = params.has("weights");
     let found = null;
     if (!explicit) {
-      if (choice !== "latest") {
-        try {
-          found = await readPinned(choice);
-        } catch (e) {
-          console.warn("no such model:", e);
-        }
-      } else
-        try {
-          const m = await readLatest();
-          found = [latestBase(m), m];
-        } catch (e) {
-          console.warn("no published manifest:", e);
-        }
+      if (!isPinned(choice) && !await channelOf(choice))
+        choice = "latest";
+      try {
+        const r = await resolveChoice(choice);
+        found = [r.base, r.config];
+      } catch (e) {
+        console.warn("no such model:", e);
+      }
       const rec = found ? null : await cachedModel();
       if (rec)
         found = [rec.base, rec.config];
@@ -3164,17 +3229,17 @@ function watchLatest() {
 }
 async function checkLatest() {
   showTaken();
-  if (following || !current || choice !== "latest")
+  if (following || !current || isPinned(choice))
     return;
   try {
-    const config = await readLatest();
-    if (sameModel(config, current.config))
+    const next = await resolveChoice(choice);
+    if (sameModel(next.config, current.config))
       return;
     if (busy) {
       followAfterReply = true;
       return;
     }
-    await follow({ base: latestBase(config), config });
+    await follow(next);
   } catch (e) {
     console.warn("could not check the published model:", e);
   }
