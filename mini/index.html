@@ -191,7 +191,7 @@ SOFTWARE.
   #chats .hint { padding: 8px; }
   #chats .headRow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 16px; }
   button.exportLink { color: var(--ink); font-size: 13px; }
-  button.exportLink:disabled { color: var(--muted); text-decoration: none; cursor: default; }
+  button.exportLink:disabled { color: var(--ink); opacity: .72; text-decoration: none; cursor: default; } /* [no-overflow] WebKit dims a disabled button to near-invisible unless this is set */
   button.linkish { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); text-decoration: underline; cursor: pointer; }
   button.linkish:hover { color: var(--accent); }
   dialog#share .small { margin: 10px 0 0; font-size: 12px; color: var(--muted); text-align: center; }
@@ -230,8 +230,12 @@ SOFTWARE.
     width: max-content; max-width: calc(100% - 32px); display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
     background: var(--panel); border: 1px solid var(--accent); border-radius: 12px; padding: 10px 14px;
     box-shadow: 0 6px 24px rgba(0,0,0,0.15); font-size: 14px; z-index: 2; }
-  .update { margin: 8px 0 0; font-size: 13px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .update button { padding: 2px 10px; font-size: 13px; }
+  /* a toast that stays until it is dismissed or the page is reloaded; above the ordinary toast */
+  .update { position: fixed; left: 50%; top: calc(12px + env(safe-area-inset-top)); transform: translateX(-50%);
+    width: max-content; max-width: calc(100% - 32px); display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    background: var(--panel); border: 1px solid var(--accent); border-radius: 12px; padding: 10px 14px; margin: 0;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.15); font-size: 14px; color: var(--ink); z-index: 3; }
+  .update button { padding: 2px 10px; font-size: 14px; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -250,9 +254,9 @@ SOFTWARE.
       <a href="#charter" data-tab="charter">Charter</a>
       <a href="slides.html" id="slidesLink" target="_blank" rel="noopener">Slides ↗</a>
       <button id="shareButton" type="button" aria-label="Share" title="Share"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M8 7l4-4 4 4M5 11v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/></svg></button>
-      <span class="ver" data-fill="site" title="site v58, built 2026-10-14 from 7c4746e">site v58</span>
+      <span class="ver" data-fill="site" title="site v59, built 2026-10-14 from 6f466f3">site v59</span>
     </nav>
-    <p class="update" id="update" role="status" hidden><span id="updateText"></span> <button id="updateReload" type="button">Reload</button></p>
+    <p class="update" id="update" role="status" hidden><span id="updateText"></span> <button id="updateReload" type="button">Reload</button> <button id="updateLater" type="button" aria-label="Dismiss">Not now</button></p>
   </header>
 
   <main id="chatTab">
@@ -354,12 +358,12 @@ SOFTWARE.
 
   <h2>How it came to be</h2>
   <p>On 2026-10-07, Nirca Mini began as a cut-down copy of nirca-0, a larger Nirca model, and has
-    trained since on short chats. The copy on this page is step <span data-fill="step">92,864</span>; the page
+    trained since on short chats. The copy on this page is step <span data-fill="step">93,884</span>; the page
     loads newer checkpoints as they are published.</p>
 
   <h2>How it is trained</h2>
-  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">92,864</span>, so for
-    <span data-fill="ternaryShare">99%</span> of its <span data-fill="tokens">3,639,609,376</span> tokens</p>
+  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">93,884</span>, so for
+    <span data-fill="ternaryShare">99%</span> of its <span data-fill="tokens">3,698,246,091</span> tokens</p>
   <div class="diagram"><svg viewBox="0 0 720 300" role="img" aria-labelledby="dtitle">
     <title id="dtitle">Training: open chat datasets and synthetic and private chats are prepared (anonymised,
       put in ChatML, cut to fit, swept for leaks) for the trainer, which writes checkpoints; checkpoints are
@@ -3785,16 +3789,16 @@ fitSeen();
     return m ? { n: Number(m[1]), key: m[0] } : null;
   };
   const mine = stampOf(document.querySelector('[data-fill="site"]')?.title);
-  let offered = false, reloadWhenDone = false;
+  let dismissed = 0, reloadWhenDone = false;
   const check = async () => {
-    if (!mine || offered || location.protocol === "file:")
+    if (!mine || location.protocol === "file:")
       return;
     try {
       const res = await fetch(location.origin + location.pathname, { cache: "no-store" });
       const theirs = res.ok ? stampOf((await res.text()).match(/data-fill="site" title="([^"]*)"/)?.[1]) : null;
-      if (!theirs || theirs.n <= mine.n)
+      if (!theirs || theirs.n <= Math.max(mine.n, dismissed) || reloadWhenDone)
         return;
-      offered = true;
+      $("updateReload").hidden = false;
       $("updateText").textContent = `A newer version of this page is available (site v${theirs.n}).`;
       $("update").hidden = false;
     } catch {}
@@ -3807,6 +3811,11 @@ fitSeen();
     reloadWhenDone = true;
     $("updateText").textContent = "Reloading when the reply is done.";
     $("updateReload").hidden = true;
+  });
+  $("updateLater").addEventListener("click", () => {
+    dismissed = Number(/v(\d+)/.exec($("updateText").textContent)?.[1] ?? mine.n);
+    reloadWhenDone = false;
+    $("update").hidden = true;
   });
   window.__update = { get waiting() {
     return reloadWhenDone;
