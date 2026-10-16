@@ -257,7 +257,7 @@ SOFTWARE.
       <button id="chatsButton" type="button" aria-expanded="false" aria-controls="chats">History</button>
       <button id="newChat" type="button" disabled>New chat</button>
     </div>
-    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v63, built 2026-10-16 from 5db60da">site v63</span></p>
+    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v65, built 2026-10-16 from 007bd84">site v65</span></p>
     <nav aria-label="Pages">
       <a href="#chat" data-tab="chat" aria-current="page">Chat</a>
       <a href="#models" data-tab="models">Models</a>
@@ -369,12 +369,12 @@ SOFTWARE.
 
   <h2>How it came to be</h2>
   <p>On 2026-10-07, Nirca Mini began as a cut-down copy of nirca-0, a larger Nirca model, and has
-    trained since on short chats. The copy on this page is step <span data-fill="step">119,515</span>; the page
+    trained since on short chats. The copy on this page is step <span data-fill="step">119,832</span>; the page
     loads newer checkpoints as they are published.</p>
 
   <h2>How it is trained</h2>
-  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">119,515</span>, so for
-    <span data-fill="ternaryShare">99%</span> of its <span data-fill="tokens">4,525,031,361</span> tokens</p>
+  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">119,832</span>, so for
+    <span data-fill="ternaryShare">99%</span> of its <span data-fill="tokens">4,533,238,862</span> tokens</p>
   <div class="diagram"><svg viewBox="0 0 720 300" role="img" aria-labelledby="dtitle">
     <title id="dtitle">Training: open chat datasets and synthetic and private chats are prepared (anonymised,
       put in ChatML, cut to fit, swept for leaks) for the trainer, which writes checkpoints; checkpoints are
@@ -3104,7 +3104,7 @@ function showFacts(config, buffer) {
 }
 var slug = (text) => String(text).toLowerCase().replace(/[^a-z0-9.]+/g, "-").replace(/^-+|-+$/g, "");
 var slugOf = (line, channel) => `${slug(line.label || line.id)}-${channel}`;
-var MODEL_LABELS = { latest: "nirca-mini-latest, follows the published model", "72178": "nirca-mini-0-step-72178, hard checkpoint", "62895": "nirca-mini-0-step-62895, fixed model", original: "nirca-mini-0-original, original published model" };
+var MODEL_LABELS = { latest: "nirca-mini-latest, follows the published model", "72178": "nirca-mini-0-base-step-72178, hard checkpoint", "62895": "nirca-mini-0-base-step-62895, fixed model", original: "nirca-mini-0-base-original, original published model" };
 var MODEL_ORDER = ["latest", "72178", "62895", "original"];
 var tokensText = (n) => `${(n / 1e9).toFixed(2)}B tokens`;
 var stepText = (c) => ` (step ${Number(c.step).toLocaleString("en-US")}${c.tokens ? `, ${tokensText(c.tokens)}` : ""})`;
