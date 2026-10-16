@@ -150,7 +150,7 @@ SOFTWARE.
   .empty { color: var(--muted); text-align: center; margin: auto 0; font-size: 14px; }
   #composer { flex: none; }
   .foot { flex: none; margin: -4px 0 0; text-align: center; font-size: 12px; color: var(--muted); }
-  html.typing .foot { display: none; }
+  html.typing .foot, html.typing .usingModel { display: none; }
   /* with the keyboard up the message box and Send always have the room: the saved-chats list and an open Settings fold away */
   html.typing #chats, html.typing details#settings[open] .settings { display: none; }
   /* with the keyboard up the space is the conversation's: the intro line and a loaded model's panel step aside */
@@ -231,6 +231,10 @@ SOFTWARE.
   .modelRow { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); min-width: 0; }
   .modelHead { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 8px; }
   .modelHead code { overflow-wrap: anywhere; font-size: 14px; }
+  /* the model about to be used, above Settings; and a discreet way from Settings to the Models tab */
+  .usingModel { margin: 8px 0 0; font-size: 13px; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+  .usingModel code { font: 13px ui-monospace, Menlo, monospace; color: var(--ink); }
+  button.allModels { flex: 1 1 100%; text-align: left; font-size: 13px; padding: 0; }
   .modelRow dl { grid-template-columns: 8.5em minmax(0, 1fr); }
   .modelRow dd { min-width: 0; overflow-wrap: anywhere; }
   @media (max-width: 520px) { .read dl { grid-template-columns: 1fr; } .read dt { margin-top: 6px; } }
@@ -257,12 +261,12 @@ SOFTWARE.
       <button id="chatsButton" type="button" aria-expanded="false" aria-controls="chats">History</button>
       <button id="newChat" type="button" disabled>New chat</button>
     </div>
-    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v65, built 2026-10-16 from 007bd84">site v65</span></p>
+    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v66, built 2026-10-16 from a7eafc0">site v66</span></p>
     <nav aria-label="Pages">
       <a href="#chat" data-tab="chat" aria-current="page">Chat</a>
-      <a href="#models" data-tab="models">Models</a>
       <a href="#about" data-tab="about">About</a>
       <a href="#charter" data-tab="charter">Charter</a>
+      <a href="#models" data-tab="models">Models</a>
       <a href="slides.html" id="slidesLink" target="_blank" rel="noopener">Slides ↗</a>
       <button id="shareButton" type="button" aria-label="Share" title="Share"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M8 7l4-4 4 4M5 11v8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-8"/></svg></button>
     </nav>
@@ -298,11 +302,13 @@ SOFTWARE.
         <button class="primary" id="send" type="submit" disabled>Send</button>
         <button id="stop" type="button" hidden>Stop</button>
       </form>
+      <p class="usingModel" id="usingModel" hidden>Model: <code id="usingName"></code><span id="usingStep"></span></p>
       <div class="tools">
         <details id="settings">
           <summary>Settings (<span id="sumExperts"></span> Active Experts ⋅ <span id="sumPasses"></span> Recurrence passes)</summary>
           <div class="settings">
             <label class="small wide">Model <select id="model" disabled></select></label>
+            <button class="linkish allModels" id="allModels" type="button">About these models</button>
             <label class="small">Experts per byte <input id="topK" type="number" inputmode="numeric" min="1" max="32" value="32"></label>
             <label class="small">Recurrence passes, least <input id="least" type="number" inputmode="numeric" min="1" max="24" value="1"></label>
             <label class="small">most <input id="most" type="number" inputmode="numeric" min="1" max="24" value="24"></label>
@@ -369,12 +375,12 @@ SOFTWARE.
 
   <h2>How it came to be</h2>
   <p>On 2026-10-07, Nirca Mini began as a cut-down copy of nirca-0, a larger Nirca model, and has
-    trained since on short chats. The copy on this page is step <span data-fill="step">119,832</span>; the page
+    trained since on short chats. The copy on this page is step <span data-fill="step">120,449</span>; the page
     loads newer checkpoints as they are published.</p>
 
   <h2>How it is trained</h2>
-  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">119,832</span>, so for
-    <span data-fill="ternaryShare">99%</span> of its <span data-fill="tokens">4,533,238,862</span> tokens</p>
+  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">120,449</span>, so for
+    <span data-fill="ternaryShare">99%</span> of its <span data-fill="tokens">4,549,209,435</span> tokens</p>
   <div class="diagram"><svg viewBox="0 0 720 300" role="img" aria-labelledby="dtitle">
     <title id="dtitle">Training: open chat datasets and synthetic and private chats are prepared (anonymised,
       put in ChatML, cut to fit, swept for leaks) for the trainer, which writes checkpoints; checkpoints are
@@ -3117,6 +3123,29 @@ function configOf(key) {
     }));
   return configs.get(key);
 }
+async function nameOf(key) {
+  if (isPinned(key))
+    return MODEL_LABELS[key].split(",")[0];
+  const index = await readIndex();
+  if (index.single)
+    return "nirca-mini-latest";
+  const ch = await channelOf(key);
+  return ch ? slugOf(ch.line, ch.channel) : key;
+}
+async function showUsing() {
+  const key = choice;
+  try {
+    const [name, config] = await Promise.all([nameOf(key), configOf(key).catch(() => null)]);
+    if (key !== choice)
+      return;
+    $("usingName").textContent = name;
+    $("usingStep").textContent = config ? ` (step ${Number(config.step).toLocaleString("en-US")})` : "";
+    $("usingModel").hidden = false;
+  } catch {}
+}
+$("allModels").addEventListener("click", () => {
+  location.hash = "#models";
+});
 async function showModels() {
   const sel = $("model");
   if (!sel.options.length) {
@@ -3143,6 +3172,7 @@ async function showModels() {
       add(pinned, key, MODEL_LABELS[key], configOf(key));
   }
   sel.value = choice;
+  showUsing();
 }
 async function chooseModel() {
   const picked = $("model").value;
@@ -3152,6 +3182,7 @@ async function chooseModel() {
   }
   const was = choice;
   choice = picked;
+  showUsing();
   try {
     const next = await resolveChoice(picked);
     const url = new URL(location.href);
@@ -3165,6 +3196,7 @@ async function chooseModel() {
   } catch (e) {
     choice = was;
     $("model").value = was;
+    showUsing();
     setLoad(`Couldn't switch the model (${e.message ?? e}); still on step ${current.config.step}.`, null, true);
   }
 }
@@ -3752,7 +3784,7 @@ async function renderModels() {
   if (mine === modelsDrawn)
     root.replaceChildren(...out);
 }
-var TABS = ["chat", "models", "about", "charter"];
+var TABS = ["chat", "about", "charter", "models"];
 function showTab() {
   const tab = TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "chat";
   for (const t of TABS)
