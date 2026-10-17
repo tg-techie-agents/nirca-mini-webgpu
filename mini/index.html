@@ -194,6 +194,7 @@ SOFTWARE.
   button.exportLink:disabled { color: var(--ink); opacity: .72; text-decoration: none; cursor: default; } /* [no-overflow] WebKit dims a disabled button to near-invisible unless this is set */
   button.linkish { background: none; border: 0; padding: 0; font: inherit; color: var(--muted); text-decoration: underline; cursor: pointer; }
   button.linkish:hover { color: var(--accent); }
+  button.tiny { font-size: 12px; padding: 1px 8px; margin-left: 4px; min-height: 0; }
   dialog#share .small { margin: 10px 0 0; font-size: 12px; color: var(--muted); text-align: center; }
   dialog#share .small:empty { display: none; }
   dialog#share .links button { font-size: 13px; }
@@ -261,7 +262,7 @@ SOFTWARE.
       <button id="chatsButton" type="button" aria-expanded="false" aria-controls="chats">History</button>
       <button id="newChat" type="button" disabled>New chat</button>
     </div>
-    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v66, built 2026-10-16 from a7eafc0">site v66</span></p>
+    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v68, built 2026-10-17 from 90df468">site v68</span></p>
     <nav aria-label="Pages">
       <a href="#chat" data-tab="chat" aria-current="page">Chat</a>
       <a href="#about" data-tab="about">About</a>
@@ -309,6 +310,7 @@ SOFTWARE.
           <div class="settings">
             <label class="small wide">Model <select id="model" disabled></select></label>
             <button class="linkish allModels" id="allModels" type="button">About these models</button>
+            <button class="linkish allModels" id="saveDiagnostics" type="button" title="Download a file of what the GPU and the page did (counts and times, no chat text), to give to whoever is looking into a problem">Save diagnostics</button>
             <label class="small">Experts per byte <input id="topK" type="number" inputmode="numeric" min="1" max="32" value="32"></label>
             <label class="small">Recurrence passes, least <input id="least" type="number" inputmode="numeric" min="1" max="24" value="1"></label>
             <label class="small">most <input id="most" type="number" inputmode="numeric" min="1" max="24" value="24"></label>
@@ -375,12 +377,12 @@ SOFTWARE.
 
   <h2>How it came to be</h2>
   <p>On 2026-10-07, Nirca Mini began as a cut-down copy of nirca-0, a larger Nirca model, and has
-    trained since on short chats. The copy on this page is step <span data-fill="step">120,449</span>; the page
+    trained since on short chats. The copy on this page is step <span data-fill="step">122,203</span>; the page
     loads newer checkpoints as they are published.</p>
 
   <h2>How it is trained</h2>
-  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">120,449</span>, so for
-    <span data-fill="ternaryShare">99%</span> of its <span data-fill="tokens">4,549,209,435</span> tokens</p>
+  <p><strong>Quantization-aware training:</strong> from step 14,655 of <span data-fill="step">122,203</span>, so for
+    <span data-fill="ternaryShare">99%</span> of its <span data-fill="tokens">4,592,602,367</span> tokens</p>
   <div class="diagram"><svg viewBox="0 0 720 300" role="img" aria-labelledby="dtitle">
     <title id="dtitle">Training: open chat datasets and synthetic and private chats are prepared (anonymised,
       put in ChatML, cut to fit, swept for leaks) for the trainer, which writes checkpoints; checkpoints are
@@ -775,7 +777,7 @@ class LibraryTooOld extends NircaWebGPUError {
 }
 
 // lib/nirca-webgpu/src/checkpoint.js
-var VERSION = "0.3.0";
+var VERSION = "0.4.0";
 var MAX_EXPERTS = 256;
 var MAX_SLOTS = 64;
 var MAX_STEPS = 31;
@@ -1999,30 +2001,75 @@ function checkDevice(limits, shape) {
       throw new DeviceTooSmall(limit, needed, limits[limit]);
   }
 }
-async function createEngine(ckpt, { device = null, onLost = null } = {}) {
+async function createEngine(ckpt, { device = null, onLost = null, onEvent = null } = {}) {
   const { shape } = ckpt;
   const owns = !device;
+  const note = (kind, data) => {
+    try {
+      onEvent?.(kind, data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+  const plain = (limits) => {
+    const o = {};
+    for (const k in limits)
+      o[k] = limits[k];
+    return o;
+  };
   if (!device) {
     const gpu = globalThis.navigator?.gpu;
-    if (!gpu)
+    if (!gpu) {
+      note("requestAdapter", { result: "no navigator.gpu" });
       throw new NoWebGPU("this browser has no WebGPU");
-    const adapter = await gpu.requestAdapter();
-    if (!adapter)
+    }
+    let t = performance.now(), adapter;
+    try {
+      adapter = await gpu.requestAdapter();
+    } catch (e) {
+      note("requestAdapter", { result: "threw", error: String(e), ms: Math.round(performance.now() - t) });
+      throw e;
+    }
+    if (!adapter) {
+      note("requestAdapter", { result: "null", ms: Math.round(performance.now() - t) });
       throw new NoWebGPU("WebGPU is present but no GPU adapter is available");
+    }
+    let info = adapter.info;
+    try {
+      info ??= await adapter.requestAdapterInfo?.();
+    } catch {}
+    note("requestAdapter", {
+      result: "adapter",
+      ms: Math.round(performance.now() - t),
+      info: info ? { vendor: info.vendor, architecture: info.architecture, device: info.device, description: info.description } : null,
+      isFallbackAdapter: adapter.isFallbackAdapter ?? null,
+      features: [...adapter.features],
+      limits: plain(adapter.limits)
+    });
     checkDevice(adapter.limits, shape);
     const need = deviceNeeds(shape);
     const ask = (name, floor) => Math.min(adapter.limits[name], Math.max(need[name], floor));
-    device = await adapter.requestDevice({ requiredLimits: {
+    const requiredLimits = {
       maxStorageBufferBindingSize: ask("maxStorageBufferBindingSize", 134217728),
       maxBufferSize: ask("maxBufferSize", 268435456)
-    } });
+    };
+    t = performance.now();
+    try {
+      device = await adapter.requestDevice({ requiredLimits });
+    } catch (e) {
+      note("requestDevice", { result: "threw", error: String(e), requiredLimits, ms: Math.round(performance.now() - t) });
+      throw e;
+    }
+    note("requestDevice", { result: "device", requiredLimits, granted: plain(device.limits), ms: Math.round(performance.now() - t) });
   } else {
     checkDevice(device.limits, shape);
+    note("device", { result: "given", granted: plain(device.limits) });
   }
+  device.addEventListener("uncapturederror", (e) => note("uncapturederror", { type: e.error?.constructor?.name, message: e.error?.message }));
   device.pushErrorScope("validation");
   let engine;
   try {
-    engine = new Engine(device, ckpt, { owns, onLost });
+    engine = new Engine(device, ckpt, { owns, onLost, onEvent: note });
   } catch (e) {
     await device.popErrorScope();
     if (owns)
@@ -2042,8 +2089,10 @@ class Engine {
     const tensors = parseSafetensors(weights).tensors;
     return createEngine({ manifest, tensors, shape: shapeOf(manifest, tensors) }, { device });
   }
-  constructor(device, { shape, tensors }, { owns = false, onLost = null } = {}) {
+  constructor(device, { shape, tensors }, { owns = false, onLost = null, onEvent = null } = {}) {
     this.device = device;
+    this.note = onEvent ?? (() => {});
+    this.stats = { madeAt: performance.now(), forwards: 0, rowsRead: 0, batches: 0, bytesDecoded: 0, submits: 0 };
     this.shape = shape;
     this.K = kernelSources(shape);
     this.ST = stateLayout(shape);
@@ -2052,6 +2101,7 @@ class Engine {
     this.destroyed = false;
     this.lostInfo = null;
     this.lost = device.lost.then((info) => {
+      this.note("lost", { reason: info.reason, message: info.message, destroyedHere: this.destroyed, offset: this.offset, ...this.usage() });
       if (this.destroyed)
         return null;
       this.lostInfo = new DeviceLost(info.reason, info.message);
@@ -2185,8 +2235,38 @@ class Engine {
       throw new Error("this engine was destroyed");
   }
   async#failed(e) {
+    this.note("map-failed", { error: String(e) });
     await Promise.race([this.lost, new Promise((r) => setTimeout(r, 200))]);
     throw this.lostInfo ?? e;
+  }
+  usage() {
+    const s = this.stats;
+    return {
+      deviceAgeMs: Math.round(performance.now() - s.madeAt),
+      forwards: s.forwards,
+      rowsRead: s.rowsRead,
+      batches: s.batches,
+      bytesDecoded: s.bytesDecoded,
+      submits: s.submits
+    };
+  }
+  #scoped(what, fn) {
+    const d = this.device, kinds = ["out-of-memory", "validation", "internal"];
+    for (const k of kinds)
+      d.pushErrorScope(k);
+    this.stats.submits++;
+    try {
+      return fn();
+    } finally {
+      for (const k of kinds.slice().reverse()) {
+        d.popErrorScope().then((err) => {
+          if (!err)
+            return;
+          console.warn(`WebGPU ${k} error in ${what}:`, err.message);
+          this.note("scope-error", { what, scope: k, message: err.message });
+        }, () => {});
+      }
+    }
   }
   #pipe(code) {
     this.pipes ??= new Map;
@@ -2410,33 +2490,39 @@ class Engine {
     if (!(this.topK >= 1 && this.topK <= this.shape.slots) || !(this.least >= 1 && this.least <= this.most && this.most <= this.maxSteps)) {
       throw new Error("settings out of range");
     }
-    const q = this.device.queue, d = this.d;
+    const q = this.device.queue, d = this.d, t0 = performance.now(), at = this.offset;
     const gs = new Uint32Array(n * 4);
     for (let i = 0;i < n; i++)
       gs.set([1, this.offset + i, this.topK, this.least | this.most << 16], i * 4);
     q.writeBuffer(d.gs, 0, gs);
     q.writeBuffer(d.hist, 4, new Uint32Array([this.picked]));
-    const enc = this.device.createCommandEncoder();
-    for (let i = 0;i < n; i++) {
-      enc.copyBufferToBuffer(d.gs, i * 16, this.g, 0, 16);
-      const pass = enc.beginComputePass();
-      for (const op of [...this.ops1, ...this.pickOps]) {
-        pass.setPipeline(op.pipe);
-        pass.setBindGroup(0, op.bind);
-        pass.dispatchWorkgroups(...op.groups(1));
-      }
-      pass.end();
-    }
     const read = d.reads.pop() ?? this.#make({ size: 128 * 4, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
-    enc.copyBufferToBuffer(d.out, 0, read, 0, 128 * 4);
-    q.submit([enc.finish()]);
+    this.#scoped("decodeBatch", () => {
+      const enc = this.device.createCommandEncoder();
+      for (let i = 0;i < n; i++) {
+        enc.copyBufferToBuffer(d.gs, i * 16, this.g, 0, 16);
+        const pass = enc.beginComputePass();
+        for (const op of [...this.ops1, ...this.pickOps]) {
+          pass.setPipeline(op.pipe);
+          pass.setBindGroup(0, op.bind);
+          pass.dispatchWorkgroups(...op.groups(1));
+        }
+        pass.end();
+      }
+      enc.copyBufferToBuffer(d.out, 0, read, 0, 128 * 4);
+      q.submit([enc.finish()]);
+    });
     this.offset += n;
     this.picked += n;
+    this.stats.batches++;
+    this.stats.bytesDecoded += n;
     return read.mapAsync(GPUMapMode.READ).then(() => {
       const u = new Uint32Array(read.getMappedRange().slice(0));
       read.unmap();
       d.reads.push(read);
-      return { ids: Array.from(u.subarray(0, n)), passes: Array.from(u.subarray(64, 64 + n)) };
+      const passes = Array.from(u.subarray(64, 64 + n));
+      this.note("batch", { n, offset: at, ms: Math.round(performance.now() - t0), passes: passes.reduce((a, b) => a + b, 0) });
+      return { ids: Array.from(u.subarray(0, n)), passes };
     }, (e) => this.#failed(e));
   }
   async forward(ids, prefill = false) {
@@ -2453,22 +2539,24 @@ class Engine {
       throw new Error(`recurrence ${this.least} to ${this.most}: at least 1, at most ${this.maxSteps}, least ≤ most`);
     }
     q.writeBuffer(this.g, 0, new Uint32Array([rows, this.offset, this.topK, this.least | this.most << 16]));
-    const enc = this.device.createCommandEncoder();
-    const pass = enc.beginComputePass();
-    for (const op of rows === 1 ? this.ops1 : this.ops) {
-      pass.setPipeline(op.pipe);
-      pass.setBindGroup(0, op.bind);
-      pass.dispatchWorkgroups(...op.groups(rows));
-    }
-    pass.end();
-    const V = this.shape.vocab, ST = this.ST;
-    enc.copyBufferToBuffer(this.b.logits, 0, this.read, 0, V * 4);
-    enc.copyBufferToBuffer(this.b.st, ST.STEPS * 4, this.read, this.vpad * 4, 4);
-    if (prefill && rows === MAX_ROWS && this.offset % MAX_ROWS === 0) {
-      const w = ST.MW * 4;
-      enc.copyBufferToBuffer(this.b.st, ST.VOTE * 4, this.snap, this.offset / MAX_ROWS * w, w);
-    }
-    q.submit([enc.finish()]);
+    const t0 = performance.now(), at = this.offset, V = this.shape.vocab, ST = this.ST;
+    this.#scoped("forward", () => {
+      const enc = this.device.createCommandEncoder();
+      const pass = enc.beginComputePass();
+      for (const op of rows === 1 ? this.ops1 : this.ops) {
+        pass.setPipeline(op.pipe);
+        pass.setBindGroup(0, op.bind);
+        pass.dispatchWorkgroups(...op.groups(rows));
+      }
+      pass.end();
+      enc.copyBufferToBuffer(this.b.logits, 0, this.read, 0, V * 4);
+      enc.copyBufferToBuffer(this.b.st, ST.STEPS * 4, this.read, this.vpad * 4, 4);
+      if (prefill && rows === MAX_ROWS && this.offset % MAX_ROWS === 0) {
+        const w = ST.MW * 4;
+        enc.copyBufferToBuffer(this.b.st, ST.VOTE * 4, this.snap, this.offset / MAX_ROWS * w, w);
+      }
+      q.submit([enc.finish()]);
+    });
     try {
       await this.read.mapAsync(GPUMapMode.READ);
     } catch (e) {
@@ -2479,6 +2567,11 @@ class Engine {
     const passes = new Uint32Array(m.slice(this.vpad * 4, this.vpad * 4 + 4))[0];
     this.read.unmap();
     this.offset += rows;
+    this.stats.forwards++;
+    this.stats.rowsRead += rows;
+    const ms = Math.round(performance.now() - t0);
+    if (rows > 1 || ms > 500)
+      this.note("forward", { rows, offset: at, ms, passes });
     return { logits, passes };
   }
 }
@@ -2788,6 +2881,87 @@ function exportChats(chats, { page = null, now = Date.now() } = {}) {
   return { format: "nirca-mini-chats", version: 1, exported: iso(now), page, note: "Replies are the model's own, greedy; a missing `at` is a message kept before times were recorded (the chat's `updated` is its latest).", conversations };
 }
 
+// web/diag.js
+var MAX_EVENTS = 4000;
+var KEEP = 100;
+var events = [];
+var counts = { turns: 0, turnsOk: 0, turnsFailed: 0, losses: 0 };
+function note(kind, data = {}) {
+  events.push({ t: Math.round(performance.now()), at: new Date().toISOString(), kind, ...data });
+  if (events.length > MAX_EVENTS)
+    events.splice(KEEP, events.length - MAX_EVENTS);
+  if (kind === "turn-start")
+    counts.turns++;
+  if (kind === "turn-end")
+    counts.turnsOk++;
+  if (kind === "turn-failed")
+    counts.turnsFailed++;
+  if (kind === "lost")
+    counts.losses++;
+}
+function heap() {
+  const m = performance.memory;
+  return m ? { usedMB: Math.round(m.usedJSHeapSize / 1e6), limitMB: Math.round(m.jsHeapSizeLimit / 1e6) } : null;
+}
+for (const [target, name] of [
+  [document, "visibilitychange"],
+  [document, "freeze"],
+  [document, "resume"],
+  [window, "pagehide"],
+  [window, "pageshow"],
+  [window, "online"],
+  [window, "offline"]
+]) {
+  target.addEventListener(name, () => note(name, { visibility: document.visibilityState }));
+}
+window.addEventListener("error", (e) => note("page-error", { message: e.message, where: `${e.filename?.split("/").pop()}:${e.lineno}` }));
+window.addEventListener("unhandledrejection", (e) => note("unhandled-rejection", { message: String(e.reason?.message ?? e.reason) }));
+var userAgentData = null;
+(async () => {
+  try {
+    const u = navigator.userAgentData;
+    if (u)
+      userAgentData = {
+        brands: u.brands,
+        mobile: u.mobile,
+        platform: u.platform,
+        ...await u.getHighEntropyValues(["architecture", "bitness", "model", "platformVersion", "fullVersionList"])
+      };
+  } catch {}
+})();
+function report(model) {
+  return {
+    what: "Nirca Mini WebGPU demo diagnostics",
+    made: new Date().toISOString(),
+    page: { build: document.querySelector(".ver")?.title ?? null, url: location.origin + location.pathname },
+    model,
+    counts: { ...counts },
+    environment: {
+      userAgent: navigator.userAgent,
+      userAgentData,
+      hardwareConcurrency: navigator.hardwareConcurrency ?? null,
+      deviceMemoryGB: navigator.deviceMemory ?? null,
+      screen: `${screen.width}x${screen.height}@${devicePixelRatio}`,
+      visibility: document.visibilityState,
+      heap: heap(),
+      secureContext: isSecureContext
+    },
+    note: "t is milliseconds since the page started loading. Counts and lengths only: no chat text is in this file.",
+    events
+  };
+}
+function download(model) {
+  const name = `nirca-mini-diagnostics-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+  note("diagnostics-saved", { name });
+  const url = URL.createObjectURL(new Blob([JSON.stringify(report(model), null, 1)], { type: "application/json" }));
+  const a = Object.assign(document.createElement("a"), { href: url, download: name });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  return name;
+}
+
 // web/facts.js
 var PUBLISHED_WEIGHTS = "https://tg-techie-agents.github.io/nirca-mini-webgpu/weights/";
 var LATEST_MANIFEST = "https://huggingface.co/nirca/nirca-mini/resolve/main/latest.json";
@@ -2970,9 +3144,26 @@ var current = null;
 var messages = [];
 var busy = false;
 var stopAsked = false;
+function modelFacts() {
+  const c = current?.config;
+  return c ? {
+    name: c.name ?? null,
+    step: c.step ?? null,
+    checkpoint: c.checkpoint ?? null,
+    sha256: c.files?.["model.safetensors"]?.sha256 ?? null,
+    bytes: c.bytes ?? null
+  } : null;
+}
+var saveDiagnostics = () => download(modelFacts());
 function setLoad(text, frac, error = false) {
-  $("loadStatus").textContent = text;
-  $("loadStatus").classList.toggle("error", error);
+  const status = $("loadStatus");
+  status.textContent = text;
+  status.classList.toggle("error", error);
+  if (error && /Reload the page/.test(text)) {
+    const button = (label, title, click) => status.append(" ", Object.assign(document.createElement("button"), { type: "button", className: "tiny", textContent: label, title, onclick: click }));
+    button("Reload", "Reload the page; your chat is kept in this browser", () => location.reload());
+    button("Save diagnostics", "Download a file of what the GPU and the page did, to give to whoever is looking into this", saveDiagnostics);
+  }
   if (frac !== null) {
     $("bar").hidden = false;
     $("bar").firstElementChild.style.width = `${Math.round(frac * 100)}%`;
@@ -3047,9 +3238,11 @@ async function startEngine(buffer, config) {
   try {
     new Tokenizer(config);
     const ckpt = await loadCheckpoint({ weights: new Uint8Array(buffer), manifest: config });
-    e = await createEngine(ckpt, { onLost: engineLost });
+    note("engine-start", { step: config.step ?? null, heap: heap() });
+    e = await createEngine(ckpt, { onLost: engineLost, onEvent: note });
     e.reset();
     await e.forward([10]);
+    note("engine-ready", { step: config.step ?? null, heap: heap() });
   } catch (err) {
     e?.destroy();
     if (err instanceof NoWebGPU)
@@ -3061,8 +3254,11 @@ async function startEngine(buffer, config) {
 }
 var lossesAt = [];
 async function engineLost(err) {
-  if (engine?.lostInfo !== err)
+  if (engine?.lostInfo !== err) {
+    note("lost-ignored", { reason: err.reason });
     return;
+  }
+  note("lost-handling", { reason: err.reason, busy, heap: heap(), ...engine.usage() });
   const lost = engine;
   engine = null;
   lost.destroy();
@@ -3075,6 +3271,7 @@ async function engineLost(err) {
     await new Promise((r) => setTimeout(r, 100));
   if (lossesAt.length > 1 || !current) {
     setLoad(`The GPU device was lost again (${why}). Reload the page to start again.`, null, true);
+    probeAdapter();
     return;
   }
   busy = true;
@@ -3087,11 +3284,27 @@ async function engineLost(err) {
     setLoad(`The GPU device was lost (${why}); the model is loaded again. Your chat continues.`, 1);
   } catch (e) {
     console.error(e);
+    note("reload-failed", { error: String(e?.message ?? e), kind: e?.name });
     setLoad(`The GPU device was lost (${why}), and the model could not be loaded again (${e.message ?? e}). Reload the page to start again.`, null, true);
+    probeAdapter();
   } finally {
     $("bar").hidden = true;
     busy = false;
     setChatEnabled(!!engine);
+  }
+}
+var probing = false;
+async function probeAdapter() {
+  if (probing || !navigator.gpu)
+    return;
+  probing = true;
+  for (const wait of [2, 5, 10, 20, 40]) {
+    await new Promise((r) => setTimeout(r, wait * 1000));
+    try {
+      note("probe-adapter", { afterSeconds: wait, adapter: !!await navigator.gpu.requestAdapter() });
+    } catch (e) {
+      note("probe-adapter", { afterSeconds: wait, threw: String(e) });
+    }
   }
 }
 function showFacts(config, buffer) {
@@ -3549,6 +3762,7 @@ async function send(text) {
   const out = new TextOut;
   let reply = "", n = 0, passes = 0, tStart = 0, ended = "";
   const t0 = performance.now();
+  note("turn-start", { turn: messages.length, promptBytes: prompt.length, maxNew, topK, least, most, offset: eng.offset, heap: heap(), device: eng.usage() });
   try {
     for await (const ev of generate(eng, prompt, { maxNew, topK, recurrence: [least, most], stop: () => stopAsked, reuse: params.get("cache") !== "0" })) {
       if (ev.reading !== undefined) {
@@ -3577,10 +3791,12 @@ async function send(text) {
     meta.textContent = `${modelText(model)} · ${n} bytes · ${(n / s).toFixed(1)} bytes/s · read ${prompt.length} in ` + `${((tStart - t0) / 1000).toFixed(1)} s · ${n ? (passes / n).toFixed(1) : 0} passes per byte · ` + `${eng.topK} experts per byte${why}`;
     el.append(meta);
     messages.push({ role: "assistant", content: reply, meta: meta.textContent, model, at: Date.now() });
+    note("turn-end", { bytes: n, ended, bytesPerSec: Math.round(n / s * 10) / 10, readMs: Math.round(tStart - t0), ms: Math.round(performance.now() - t0), passes, heap: heap(), device: eng.usage() });
     saveChat();
     $("genStatus").textContent = "";
   } catch (e) {
     console.error(e);
+    note("turn-failed", { bytes: n, error: String(e?.message ?? e), kind: e?.name, reason: e?.reason, ms: Math.round(performance.now() - t0), heap: heap(), device: eng.usage() });
     span.textContent = reply;
     el.append(Object.assign(document.createElement("span"), { className: "meta error", textContent: `Failed: ${e.message ?? e}` }));
     messages.pop();
@@ -3642,8 +3858,11 @@ $("newChat").addEventListener("click", () => {
   $("input").focus();
 });
 $("chatsButton").addEventListener("click", () => toggleChats());
+$("saveDiagnostics").addEventListener("click", saveDiagnostics);
 window.__chat = { destroyDevice() {
   engine?.device.destroy();
+}, get diagnostics() {
+  return report(modelFacts());
 }, get ready() {
   return !!engine && !busy;
 }, get step() {
@@ -3712,7 +3931,7 @@ async function renderModels() {
     el("h2", { textContent: "Models" }),
     el("p", { textContent: "Every model this page can run, as the published list names them, with what each model's own files say. The name is the same as in the chooser under Settings. Use switches the chat to that model." })
   ];
-  const note = el("p", { className: "small", role: "status" });
+  const note2 = el("p", { className: "small", role: "status" });
   const detail = async (r) => {
     const c = await configOf(r.key).catch(() => null);
     const dl = el("dl");
@@ -3751,7 +3970,7 @@ async function renderModels() {
     const use = el("button", { type: "button", textContent: r.key === choice ? "In use" : "Use", disabled: r.key === choice });
     use.addEventListener("click", async () => {
       if (busy) {
-        note.textContent = "A reply is being written; try again when it is done.";
+        note2.textContent = "A reply is being written; try again when it is done.";
         return;
       }
       await showModels();
@@ -3769,7 +3988,7 @@ async function renderModels() {
       const use = el("button", { type: "button", textContent: key === choice ? "In use" : "Use", disabled: key === choice });
       use.addEventListener("click", async () => {
         if (busy) {
-          note.textContent = "A reply is being written; try again when it is done.";
+          note2.textContent = "A reply is being written; try again when it is done.";
           return;
         }
         await showModels();
@@ -3780,7 +3999,7 @@ async function renderModels() {
       section.append(el("div", { className: "modelRow" }, el("div", { className: "modelHead" }, el("code", { textContent: MODEL_LABELS[key].split(",")[0] }), use), await detail({ key })));
     }
   }
-  out.push(note);
+  out.push(note2);
   if (mine === modelsDrawn)
     root.replaceChildren(...out);
 }
@@ -3888,15 +4107,15 @@ for (const b of document.querySelectorAll("[data-export]"))
 var chatLink = async () => `${location.origin}${location.pathname}#${FRAGMENT}${await packChat(messages)}`;
 var shared = false;
 {
-  const dlg = $("share"), btn = $("shareChat"), note = $("shareChatNote");
+  const dlg = $("share"), btn = $("shareChat"), note2 = $("shareChatNote");
   const available = () => !shared && messages.some((m) => m.role === "assistant");
   $("shareButton").addEventListener("click", () => {
     btn.hidden = !available();
-    note.textContent = "";
+    note2.textContent = "";
   });
   const field = $("shareChatUrl");
   btn.addEventListener("click", async () => {
-    note.textContent = "";
+    note2.textContent = "";
     field.hidden = true;
     let url = null, ok = false;
     try {
@@ -3915,18 +4134,18 @@ var shared = false;
         } catch {}
       }
     } catch (e) {
-      note.textContent = e instanceof TooLong ? `${e.message}. Use Export chats in History instead.` : `Couldn't make a link (${e.message ?? e}).`;
+      note2.textContent = e instanceof TooLong ? `${e.message}. Use Export chats in History instead.` : `Couldn't make a link (${e.message ?? e}).`;
       return;
     }
     if (ok) {
-      note.textContent = "Copied. The chat is inside the link; no server sees it.";
+      note2.textContent = "Copied. The chat is inside the link; no server sees it.";
       return;
     }
     field.value = url;
     field.hidden = false;
     field.focus();
     field.select();
-    note.textContent = "Press and hold the link to copy it.";
+    note2.textContent = "Press and hold the link to copy it.";
   });
 }
 async function showShared(text) {
