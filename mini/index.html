@@ -262,7 +262,7 @@ SOFTWARE.
       <button id="chatsButton" type="button" aria-expanded="false" aria-controls="chats">History</button>
       <button id="newChat" type="button" disabled>New chat</button>
     </div>
-    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v68, built 2026-10-17 from 90df468">site v68</span></p>
+    <p id="about"><span data-fill="paramsM">109M</span> parameters, ternary weights, <span data-fill="experts">32</span> experts with adaptive recurrence, on your own GPU. <span class="ver" data-fill="site" title="site v70, built 2026-10-17 from 12b8101">site v70</span></p>
     <nav aria-label="Pages">
       <a href="#chat" data-tab="chat" aria-current="page">Chat</a>
       <a href="#about" data-tab="about">About</a>
@@ -1944,6 +1944,7 @@ fn main() {
 
 // lib/nirca-webgpu/src/engine.js
 var MAX_ROWS = 512;
+var SLICE_ROWS = 48;
 var NONE = 4294967295;
 function f16ToF32(bytes) {
   const u = new Uint16Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
@@ -2092,6 +2093,7 @@ class Engine {
   constructor(device, { shape, tensors }, { owns = false, onLost = null, onEvent = null } = {}) {
     this.device = device;
     this.note = onEvent ?? (() => {});
+    this.sliceRows = SLICE_ROWS;
     this.stats = { madeAt: performance.now(), forwards: 0, rowsRead: 0, batches: 0, bytesDecoded: 0, submits: 0 };
     this.shape = shape;
     this.K = kernelSources(shape);
@@ -2540,23 +2542,33 @@ class Engine {
     }
     q.writeBuffer(this.g, 0, new Uint32Array([rows, this.offset, this.topK, this.least | this.most << 16]));
     const t0 = performance.now(), at = this.offset, V = this.shape.vocab, ST = this.ST;
-    this.#scoped("forward", () => {
-      const enc = this.device.createCommandEncoder();
-      const pass = enc.beginComputePass();
-      for (const op of rows === 1 ? this.ops1 : this.ops) {
-        pass.setPipeline(op.pipe);
-        pass.setBindGroup(0, op.bind);
-        pass.dispatchWorkgroups(...op.groups(rows));
-      }
-      pass.end();
-      enc.copyBufferToBuffer(this.b.logits, 0, this.read, 0, V * 4);
-      enc.copyBufferToBuffer(this.b.st, ST.STEPS * 4, this.read, this.vpad * 4, 4);
-      if (prefill && rows === MAX_ROWS && this.offset % MAX_ROWS === 0) {
-        const w = ST.MW * 4;
-        enc.copyBufferToBuffer(this.b.st, ST.VOTE * 4, this.snap, this.offset / MAX_ROWS * w, w);
-      }
-      q.submit([enc.finish()]);
-    });
+    const list = rows === 1 ? this.ops1 : this.ops;
+    const slices = Math.max(1, Math.min(list.length, Math.ceil(rows / this.sliceRows)));
+    const per = Math.ceil(list.length / slices);
+    for (let i = 0;i < slices; i++) {
+      const last = i === slices - 1;
+      this.#scoped("forward", () => {
+        const enc = this.device.createCommandEncoder();
+        const pass = enc.beginComputePass();
+        for (const op of list.slice(i * per, (i + 1) * per)) {
+          pass.setPipeline(op.pipe);
+          pass.setBindGroup(0, op.bind);
+          pass.dispatchWorkgroups(...op.groups(rows));
+        }
+        pass.end();
+        if (last) {
+          enc.copyBufferToBuffer(this.b.logits, 0, this.read, 0, V * 4);
+          enc.copyBufferToBuffer(this.b.st, ST.STEPS * 4, this.read, this.vpad * 4, 4);
+          if (prefill && rows === MAX_ROWS && this.offset % MAX_ROWS === 0) {
+            const w = ST.MW * 4;
+            enc.copyBufferToBuffer(this.b.st, ST.VOTE * 4, this.snap, this.offset / MAX_ROWS * w, w);
+          }
+        }
+        q.submit([enc.finish()]);
+      });
+      if (!last)
+        await q.onSubmittedWorkDone().catch(() => {});
+    }
     try {
       await this.read.mapAsync(GPUMapMode.READ);
     } catch (e) {
@@ -2571,7 +2583,7 @@ class Engine {
     this.stats.rowsRead += rows;
     const ms = Math.round(performance.now() - t0);
     if (rows > 1 || ms > 500)
-      this.note("forward", { rows, offset: at, ms, passes });
+      this.note("forward", { rows, offset: at, ms, passes, slices });
     return { logits, passes };
   }
 }
@@ -3240,9 +3252,11 @@ async function startEngine(buffer, config) {
     const ckpt = await loadCheckpoint({ weights: new Uint8Array(buffer), manifest: config });
     note("engine-start", { step: config.step ?? null, heap: heap() });
     e = await createEngine(ckpt, { onLost: engineLost, onEvent: note });
+    if (params.has("slice"))
+      e.sliceRows = Number(params.get("slice")) || Infinity;
     e.reset();
     await e.forward([10]);
-    note("engine-ready", { step: config.step ?? null, heap: heap() });
+    note("engine-ready", { step: config.step ?? null, sliceRows: e.sliceRows, heap: heap() });
   } catch (err) {
     e?.destroy();
     if (err instanceof NoWebGPU)
@@ -3861,6 +3875,8 @@ $("chatsButton").addEventListener("click", () => toggleChats());
 $("saveDiagnostics").addEventListener("click", saveDiagnostics);
 window.__chat = { destroyDevice() {
   engine?.device.destroy();
+}, get engine() {
+  return engine;
 }, get diagnostics() {
   return report(modelFacts());
 }, get ready() {
